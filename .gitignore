@@ -1,0 +1,52 @@
+# Eyes Cerberus - Git Ignore
+
+# Logs
+*.log
+logs/
+*.out
+
+# Evidence and forensic data
+evidence/
+containment/malware_source/
+containment/logs/
+
+# Quarantine (malware samples - DO NOT COMMIT!)
+defense/quarantine/
+/var/malware_containment/
+
+# PID files
+*.pid
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Known malware hashes (update locally)
+known_malware_hashes.txt
+
+# Configuration with sensitive data
+defense/defense_config.cfg
+
+# Reports with sensitive info (review before commit)
+# INVESTIGATION_REPORT.md
+# FINAL_REPORT.md
+# CRITICAL_UPDATE.md
+
+# Honeypot decoys
+honeypot/decoys/
+honeypot/logs/
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# Editor
+*.orig
+*.rej
