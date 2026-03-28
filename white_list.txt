@@ -1,0 +1,13 @@
+python3
+node
+postgres
+htop
+sshd
+rsync
+tar
+gzip
+uvicorn
+systemd
+nginx
+vscode-server
+node
