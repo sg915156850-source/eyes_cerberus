@@ -9,20 +9,17 @@ tiers: high-confidence signatures are auto-contained, heuristics only alert.
 > **Not** an antivirus, not an EDR, not a replacement for hardening. It is a
 > narrow, auditable safety net with a bias against touching legitimate processes.
 
----
+## Status
 
-## Why this rewrite (v2.0)
-
-The v1 scripts did not actually protect anything:
-
-| v1 problem | v2 fix |
-|---|---|
-| `systemd` unit was `Type=oneshot`; it launched `nohup` workers and exited, so nothing supervised or restarted them. They had been dead for weeks. | `Type=simple` + `Restart=always`. systemd owns the real process. |
-| `set -euo pipefail` + `grep` with no match → script aborts silently mid-loop. | No `set -e`. Risky calls guarded; the loop cannot die on an empty match. |
-| Auto-kill on "CPU > 60%" using the `ps` **lifetime average** → it SIGKILLed `unattended-upgrade`, `fwupd`, `pg_dump`, other projects' services. | CPU is a **SOFT** signal: instantaneous sampling, sustained over N passes, whitelist-guarded, **never kills**. |
-| Two overlapping detect engines, 3 more half-wired response scripts, two config files (one absent). | One daemon, one config, data-driven signature files. |
-| "Alerts" went only to a logfile nobody reads. | Structured `events.jsonl` + `notify()` (log / Telegram / webhook / email) + `master.sh digest`. |
-| iptables rules lost on reboot. | Daemon re-applies C2 DROP rules on every start. |
+- **v2.0** — full rewrite into a single supervised daemon. See `CHANGELOG.md`
+  for what changed and why (the v1 layout had been dead for weeks: a
+  `Type=oneshot` unit whose `nohup` workers nothing restarted, detect loops that
+  aborted on the first empty `grep`, and a CPU heuristic that SIGKILLed
+  `unattended-upgrade` / `fwupd` / `pg_dump`).
+- Known indicators for this host are tracked in `KNOWN_THREATS.md`; the
+  machine-readable form is `etc/signatures/`.
+- The daemon is **enabled via systemd** once you run the Install steps below.
+  Until then nothing is watching — `./master.sh status` tells you which.
 
 ---
 
@@ -93,7 +90,7 @@ state/                   runtime (git-ignored): events.jsonl, evidence/, quarant
 | `miner` | miner-like argv but **not** CPU-hot |
 | `exe_in_volatile` / `deleted_exe` | process running from `/tmp`,`/dev/shm`,… or from an unlinked binary whose origin was a volatile dir (package upgrades under `/usr` are ignored) |
 | `new_listener` | a listening TCP port absent from `state/baseline/listeners` |
-| `persistence` | additions vs `state/baseline/` in: root crontab, `/etc/cron.*`, systemd unit files, running services, `/root/.ssh/authorized_keys`, root shell rc files, `/etc/ld.so.preload` (checked every `PERSISTENCE_EVERY` passes) |
+| `persistence` | additions vs `state/baseline/` in: root crontab, `/etc/cron.*`, systemd unit files, running services, `/root/.ssh/authorized_keys`, root shell rc files, `/etc/ld.so.preload` (checked once every `PERSISTENCE_EVERY` passes; removals are ignored) |
 | `upx_new` | a newly-appeared UPX-packed executable in a world-writable dir |
 | `egress` | new outbound connection to a non-whitelisted external IP (**off by default**, noisy) |
 
@@ -110,10 +107,11 @@ cd /root/projects/eyes_cerberus
 cp etc/cerberus.env.example etc/cerberus.env      # edit thresholds / notify
 ./cerberus.sh dryscan                             # sanity check: prints findings, no action
 
-sudo cp systemd/eyes-cerberus.service /etc/systemd/system/
+# If an older Eyes Cerberus unit is installed, this file replaces it in place.
+sudo cp systemd/eyes-cerberus.service /etc/systemd/system/eyes-cerberus.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now eyes-cerberus.service
-./master.sh status
+./master.sh status                                # -> daemon: active (<pid>)
 ```
 
 Optional daily digest (writes nothing external, just to the journal):
@@ -144,6 +142,11 @@ After a legitimate change (new service, new cron job, new listening port) you
 will get one `persistence` / `new_listener` alert, then run `./master.sh baseline`
 to re-baseline.
 
+Runtime lives under `state/` (git-ignored): `events.jsonl` (one JSON line per
+finding), `evidence/`, `quarantine/`, `baseline/`, and `cerberus.log` — a plain
+log that also carries an hourly `heartbeat: N passes, M events total` line so you
+can tell the loop is alive even when nothing fires.
+
 ### Configuration (`etc/cerberus.env`)
 
 | Key | Default | Meaning |
@@ -151,12 +154,14 @@ to re-baseline.
 | `SENSOR_INTERVAL` | `30` | seconds between passes |
 | `CPU_THRESHOLD` | `85` | percent (per core) for the `high_cpu` heuristic |
 | `CPU_SUSTAIN_SAMPLES` | `4` | consecutive over-threshold passes before alerting |
+| `PERSISTENCE_EVERY` | `10` | run the persistence diff once every N passes (it is the slowest probe) |
 | `AUTO_RESPONSE` | `1` | `0` = alert-only for everything (HARD still logs + notifies) |
 | `BLOCK_C2_PORTS` | `0` | also DROP outbound to `c2_ports.txt` (affects all hosts — opt-in) |
 | `DRY_RUN` | `0` | `1` = never kill/chmod/iptables, only log with `[DRY]` |
-| `NOTIFY_METHOD` | `log` | `log` \| `telegram` \| `webhook` \| `email` |
-| `NOTIFY_MIN_SEVERITY` | `SOFT` | `HARD` to mute SOFT notifications (still recorded) |
-| `DETECT_*` | `1` | toggle individual SOFT detectors |
+| `NOTIFY_METHOD` | `log` | `log` \| `telegram` \| `webhook` \| `email` (+ `TG_TOKEN`/`TG_CHAT`, `WEBHOOK_URL`, `EMAIL_TO`) |
+| `NOTIFY_MIN_SEVERITY` | `SOFT` | `HARD` to mute SOFT notifications (still recorded in `events.jsonl`) |
+| `DETECT_HIGH_CPU` / `DETECT_NEW_LISTENER` / `DETECT_PERSISTENCE` / `DETECT_UPX_NEW` | `1` | toggle individual SOFT detectors |
+| `DETECT_EGRESS` | `0` | outbound-connection watch — noisy, opt-in |
 
 Signatures are plain text, one entry per line, `#` comments — edit and the daemon
 picks them up on the next pass (no restart needed).
