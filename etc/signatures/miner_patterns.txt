@@ -1,0 +1,17 @@
+# Extended regex alternatives matched (case-insensitive) against process argv.
+# A match is only escalated to HARD when the process is ALSO above the CPU
+# threshold; a bare name match on its own is logged as SOFT.
+# One token per line. Blank lines and # comments ignored.
+xmrig
+minerd
+cpuminer
+cpuminer-multi
+cryptonight
+randomx
+xmr-stak
+minergate
+nicehash
+nanopool\.org
+minexmr\.com
+supportxmr\.com
+pool\.hashvault

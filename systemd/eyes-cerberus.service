@@ -1,0 +1,35 @@
+# Eyes Cerberus host defense daemon.
+# Install:
+#   cp systemd/eyes-cerberus.service /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now eyes-cerberus.service
+#
+# This replaces the old Type=oneshot unit: that one launched background workers
+# with nohup and exited, so systemd never supervised them and nothing restarted
+# them when they died. This unit runs the daemon in the foreground and restarts
+# it on any exit.
+
+[Unit]
+Description=Eyes Cerberus host defense daemon
+Documentation=https://github.com/sg915156850-source/eyes_cerberus
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/projects/eyes_cerberus
+ExecStart=/root/projects/eyes_cerberus/cerberus.sh run
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=0
+TimeoutStopSec=15
+
+# Needs root: kill arbitrary PIDs, read /proc/<pid>/{exe,environ}, run iptables.
+User=root
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cerberus
+
+[Install]
+WantedBy=multi-user.target

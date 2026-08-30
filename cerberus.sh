@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+#===============================================================================
+# Eyes Cerberus - host defense daemon
+#
+#   cerberus.sh run     Supervised sensor loop (this is what systemd runs).
+#   cerberus.sh scan    One detector pass, print findings, then act on them.
+#   cerberus.sh dryscan One detector pass, print findings, take NO action.
+#   cerberus.sh baseline Rebuild the persistence baseline from current state.
+#
+# Design notes:
+#   * No `set -e`. A detector that exits non-zero (e.g. grep with no match) must
+#     never kill the loop. Risky calls are guarded via run() / `|| true`.
+#   * Detectors (lib/detect.sh) emit  SEVERITY|CATEGORY|PID|DETAIL  lines.
+#   * Responder (lib/respond.sh) is tiered: HARD may auto-act, SOFT alerts only.
+#   * All config lives in etc/cerberus.env (see etc/cerberus.env.example).
+#===============================================================================
+set -uo pipefail
+
+_self="${BASH_SOURCE[0]}"
+_dir="$(cd -P "$(dirname "$_self")" >/dev/null 2>&1 && pwd)"
+
+# shellcheck source=lib/common.sh
+source "$_dir/lib/common.sh"
+# shellcheck source=lib/forensics.sh
+source "$_dir/lib/forensics.sh"
+# shellcheck source=lib/baseline.sh
+source "$_dir/lib/baseline.sh"
+# shellcheck source=lib/detect.sh
+source "$_dir/lib/detect.sh"
+# shellcheck source=lib/respond.sh
+source "$_dir/lib/respond.sh"
+
+VERSION="2.0.0"
+
+one_pass() {
+  local act="$1"   # act | noact
+  local findings
+  findings="$(run_all_detectors)"
+  if [ -z "$findings" ]; then
+    [ "$act" = "noact" ] && echo "(no findings)"
+    return 0
+  fi
+  local line
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    if [ "$act" = "noact" ]; then
+      printf '%s\n' "$line"
+    else
+      printf '%s\n' "$line" >&2
+      handle_finding "$line"
+    fi
+  done <<< "$findings"
+}
+
+cmd_run() {
+  info "Eyes Cerberus v$VERSION starting (interval=${SENSOR_INTERVAL}s, auto_response=${AUTO_RESPONSE}, dry_run=${DRY_RUN}, notify=${NOTIFY_METHOD})"
+  apply_c2_firewall
+  baseline_diff >/dev/null 2>&1 || true   # seed baseline on first ever run
+  trap 'info "Eyes Cerberus stopping"; exit 0' TERM INT
+  export CERBERUS_PASS=0
+  local hb_every=$(( 3600 / (SENSOR_INTERVAL > 0 ? SENSOR_INTERVAL : 30) ))
+  [ "$hb_every" -lt 1 ] && hb_every=1
+  while true; do
+    one_pass act || warn "detector pass returned $?"
+    CERBERUS_PASS=$(( CERBERUS_PASS + 1 ))
+    if [ $(( CERBERUS_PASS % hb_every )) -eq 0 ]; then
+      local ev=0; [ -f "$EVENTS_LOG" ] && ev="$(wc -l < "$EVENTS_LOG" | tr -d ' ')"
+      info "heartbeat: ${CERBERUS_PASS} passes, ${ev} events total"
+    fi
+    sleep "$SENSOR_INTERVAL" &
+    wait $!
+  done
+}
+
+case "${1:-run}" in
+  run)      cmd_run ;;
+  scan)     info "manual scan"; one_pass act ;;
+  dryscan)  CERBERUS_DRY_RUN=1 DRY_RUN=1 one_pass noact ;;
+  baseline) baseline_build ;;
+  version|-v|--version) echo "eyes-cerberus $VERSION" ;;
+  *)
+    cat <<EOF
+Eyes Cerberus v$VERSION
+Usage: $0 {run|scan|dryscan|baseline|version}
+  run       supervised sensor loop (systemd entrypoint)
+  scan      one pass: detect + respond
+  dryscan   one pass: detect + print only, no action
+  baseline  rebuild persistence baseline from current host state
+EOF
+    exit 1 ;;
+esac

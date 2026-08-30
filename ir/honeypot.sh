@@ -14,8 +14,8 @@
 
 set -euo pipefail
 
-ROOT="/root/eyes_cerberus"
-HONEYPOT_DIR="$ROOT/honeypot"
+ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." >/dev/null 2>&1 && pwd)"
+HONEYPOT_DIR="$ROOT/state/honeypot"
 LOG_DIR="$HONEYPOT_DIR/logs"
 DECOY_DIR="$HONEYPOT_DIR/decoys"
 CONFIG_FILE="$HONEYPOT_DIR/honeypot_config.cfg"
@@ -149,8 +149,8 @@ log_connection() {
     
     echo "$timestamp | IP: $ip | Port: $port" >> "$LOG_DIR/connections.log"
     
-    # Also log to main hunt log
-    echo "$timestamp [HONEYPOT] Connection from $ip:$port" >> "$ROOT/hunt.log"
+    # Also log to the events stream
+    echo "{\"ts\":\"$timestamp\",\"severity\":\"SOFT\",\"category\":\"honeypot\",\"pid\":\"-\",\"detail\":\"connection from $ip:$port\"}" >> "$ROOT/state/events.jsonl"
     
     # GeoIP lookup (if available)
     if command -v geoiplookup &>/dev/null; then

@@ -12,8 +12,8 @@
 
 set -euo pipefail
 
-ROOT="/root/eyes_cerberus"
-CONTAINMENT_DIR="$ROOT/containment"
+ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." >/dev/null 2>&1 && pwd)"
+CONTAINMENT_DIR="$ROOT/state/containment"
 CONTAINER_NAME="malware_sandbox_$(date +%Y%m%d_%H%M%S)"
 LOG_FILE="$CONTAINMENT_DIR/containment.log"
 

@@ -1,0 +1,51 @@
+# Process names (ps `comm`, exact match, max 15 chars as the kernel truncates)
+# that Cerberus must never flag for CPU/miner heuristics. C2 / known-hash /
+# known-path detectors ignore this list on purpose.
+#
+# Keep this conservative: only add names you are certain are benign on this host.
+
+# --- interpreters / app servers ---
+python3
+node
+uvicorn
+gunicorn
+
+# --- databases ---
+postgres
+redis-server
+
+# --- web / proxy ---
+nginx
+
+# --- system daemons that legitimately spike CPU ---
+systemd
+unattended-upgr
+fwupd
+packagekitd
+apt
+apt-get
+dpkg
+snapd
+mandb
+man-db.periodic
+
+# --- backup / archive / sync (routine heavy CPU) ---
+pg_dump
+pg_basebackup
+pg_restore
+rsync
+tar
+gzip
+pigz
+zstd
+xz
+borg
+restic
+
+# --- ops tooling ---
+sshd
+htop
+top
+docker
+dockerd
+containerd

@@ -1,53 +1,27 @@
-# Eyes Cerberus - Git Ignore
+# Eyes Cerberus
 
-# Logs
-*.log
-logs/
-*.out
+# Runtime state: events, evidence, quarantine, baselines, markers, logs.
+# Never commit quarantined samples or forensic captures.
+state/
 
-# Evidence and forensic data
-evidence/
-containment/malware_source/
-containment/logs/
+# Local config (may contain a Telegram token / webhook URL).
+etc/cerberus.env
 
-# Quarantine (malware samples - DO NOT COMMIT!)
-defense/quarantine/
-/var/malware_containment/
-
-# PID files
+# Legacy runtime artefacts (pre-2.0 layout), in case an old checkout is around.
 *.pid
-
-# Temporary files
-*.tmp
-*.bak
-*.swp
-*~
-
-# System files
-.DS_Store
-Thumbs.db
-
-# Known malware hashes (update locally)
-known_malware_hashes.txt
-
-# Configuration with sensitive data
-defense/defense_config.cfg
-
-# Reports with sensitive info (review before commit)
-# INVESTIGATION_REPORT.md
-# FINAL_REPORT.md
-# CRITICAL_UPDATE.md
-
-# Honeypot decoys
+*.out
+hunt.log
+defense/
+m/
 honeypot/decoys/
 honeypot/logs/
+/var/malware_containment/
 
-# IDE
-.vscode/
-.idea/
-*.sublime-*
-
-# Editor
+# Editor / OS
+*.swp
+*~
 *.orig
 *.rej
-garbidg/
+.DS_Store
+.vscode/
+.idea/

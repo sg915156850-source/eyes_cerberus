@@ -1,0 +1,6 @@
+# Suspicious outbound TCP ports to DROP and to flag in `nc`/`socat` argv.
+# One per line. Blank lines and # comments ignored.
+9009
+14444
+4444
+5555
