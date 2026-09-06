@@ -43,11 +43,6 @@ cp -a "$SRC/etc/cerberus.env.example"   "$CONF/cerberus.env.example"
 cp -a "$SRC"/systemd/*.service "$UNITS/"
 ln -sfn /opt/eyes-cerberus/master.sh "$BUILD/usr/local/sbin/cerberus"
 
-[ -f "$SRC/packaging/logrotate.conf" ] && {
-  mkdir -p "$BUILD/etc/logrotate.d"
-  cp -a "$SRC/packaging/logrotate.conf" "$BUILD/etc/logrotate.d/eyes-cerberus"
-}
-
 chmod 755 "$CODE/cerberus.sh" "$CODE/master.sh"
 chmod 750 "$CONF" "$CONF/signatures"
 chmod 640 "$CONF"/signatures/*.txt "$CONF/whitelist.txt" "$CONF/cerberus.env.example"

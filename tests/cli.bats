@@ -115,3 +115,27 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"run this from the source tree"* ]]
 }
+
+@test "dryscan does not seed any baseline or bookkeeping state" {
+  # "no action" has to mean no state either: a dry run that seeds the
+  # persistence baseline silently declares a possibly-compromised host to be
+  # known-good, and the operator was told nothing happened.
+  sig malware_md5.txt "00000000000000000000000000000000"
+  run "$REPO_ROOT/cerberus.sh" dryscan
+  [ "$status" -eq 0 ]
+
+  [ ! -f "$CERBERUS_STATE_DIR/baseline/units" ]
+  [ ! -f "$CERBERUS_STATE_DIR/baseline/listeners" ]
+  [ ! -f "$CERBERUS_STATE_DIR/cpu_sustain.tsv" ]
+  [ ! -f "$CERBERUS_STATE_DIR/seen_loaders" ]
+  [ ! -f "$CERBERUS_STATE_DIR/.hashscan_marker" ]
+  [ ! -f "$CERBERUS_STATE_DIR/.upxscan_marker" ]
+}
+
+@test "a real scan does seed it" {
+  # the hash scan only runs when there is something to compare against
+  sig malware_md5.txt "00000000000000000000000000000000"
+  run "$REPO_ROOT/cerberus.sh" scan
+  [ "$status" -eq 0 ]
+  [ -f "$CERBERUS_STATE_DIR/.hashscan_marker" ]
+}

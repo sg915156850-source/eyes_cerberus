@@ -126,7 +126,15 @@ baseline_build() {
 # now but absent from the baseline. No-op (and self-seeding) if no baseline yet.
 baseline_diff() {
   if [ ! -f "$BASELINE_DIR/units" ]; then
-    baseline_build
+    # No baseline yet: record the current persistence surface instead of
+    # reporting all of it as new. Never during a dry run -- taking a baseline
+    # is a decision ("this host is known-good"), and making it silently on a
+    # host that may already be compromised is exactly the wrong default.
+    if state_writable; then
+      baseline_build
+    else
+      log DRY "would seed the persistence baseline at $BASELINE_DIR"
+    fi
     return 0
   fi
   local cur; cur="$(mktemp -d)"

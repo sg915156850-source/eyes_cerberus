@@ -349,7 +349,9 @@ detect_high_cpu() {
     done < "$CPU_STATE_FILE"
   fi
 
-  : > "$CPU_STATE_FILE.tmp"
+  local persist=1
+  state_writable || persist=0
+  [ "$persist" = "1" ] && : > "$CPU_STATE_FILE.tmp"
   local p cpu cnt em args key st
   for p in "${!now[@]}"; do
     cpu="${now[$p]}"
@@ -363,9 +365,11 @@ detect_high_cpu() {
       echo "SOFT|high_cpu|$p|sustained ${cpu}% CPU over ${cnt} samples: ${args}"
       em=1
     fi
-    printf '%s\t%s\t%s\n' "$key" "$cnt" "$em" >> "$CPU_STATE_FILE.tmp"
+    [ "$persist" = "1" ] && \
+      printf '%s\t%s\t%s\n' "$key" "$cnt" "$em" >> "$CPU_STATE_FILE.tmp"
   done
-  mv "$CPU_STATE_FILE.tmp" "$CPU_STATE_FILE"
+  [ "$persist" = "1" ] && mv "$CPU_STATE_FILE.tmp" "$CPU_STATE_FILE"
+  return 0
 }
 
 #---------------------------------------------------------------------------
@@ -376,7 +380,18 @@ detect_new_listener() {
   command -v ss >/dev/null 2>&1 || return 0
   local base="$BASELINE_DIR/listeners"
   local cur; cur="$(ss -tlnH 2>/dev/null | awk '{print $4}' | sed 's/.*://' | sort -u | grep -E '^[0-9]+$' || true)"
-  [ -f "$base" ] || { printf '%s\n' "$cur" > "$base"; return 0; }
+  if [ ! -f "$base" ]; then
+    # First run: record what is listening now rather than reporting every
+    # existing port. Under a dry run, record nothing -- seeding the baseline
+    # is a change, and doing it silently would bless whatever a compromised
+    # host happens to have open.
+    if state_writable; then
+      printf '%s\n' "$cur" > "$base"
+    else
+      log DRY "would seed the listener baseline at $base"
+    fi
+    return 0
+  fi
   local port
   while read -r port; do
     [ -n "$port" ] || continue
@@ -420,7 +435,9 @@ detect_loader() {
   pat="$(read_sig loader_patterns.txt | paste -sd'|' -)"
   [ -n "$pat" ] || return 0
 
-  [ -f "$LOADER_SEEN_FILE" ] || : > "$LOADER_SEEN_FILE"
+  local persist=1
+  state_writable || persist=0
+  [ "$persist" = "1" ] && [ ! -f "$LOADER_SEEN_FILE" ] && : > "$LOADER_SEEN_FILE"
 
   local where line key
   while IFS= read -r line; do
@@ -430,8 +447,10 @@ detect_loader() {
     echo "$line" | grep -qiE "$pat" || continue
 
     key="$(printf '%s|%s' "$where" "$line" | sha256sum | cut -d' ' -f1)"
-    grep -qxF "$key" "$LOADER_SEEN_FILE" && continue
-    printf '%s\n' "$key" >> "$LOADER_SEEN_FILE"
+    if [ -f "$LOADER_SEEN_FILE" ] && grep -qxF "$key" "$LOADER_SEEN_FILE"; then
+      continue
+    fi
+    [ "$persist" = "1" ] && printf '%s\n' "$key" >> "$LOADER_SEEN_FILE"
 
     echo "SOFT|loader|-|downloads and executes code, in ${where}: $(echo "$line" | tr -s ' ')"
   done < <(_loader_sources)

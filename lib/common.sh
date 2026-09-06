@@ -151,6 +151,17 @@ iter_pids() {
   done
 }
 
+# state_writable : false under DRY_RUN.
+#
+# The detectors keep bookkeeping of their own -- scan markers, the CPU sustain
+# counter, the listener baseline, the loader dedupe set. A dry run that quietly
+# advances any of it is not a dry run: the operator is told nothing happened
+# and the next real pass then behaves differently. Guard every such write with
+# this.
+state_writable() {
+  [ "${DRY_RUN:-0}" != "1" ]
+}
+
 # --- Log rotation ---------------------------------------------------------
 # events.jsonl and cerberus.log used to grow without limit. On a host that is
 # actually under attack the event rate is exactly when you least want the disk

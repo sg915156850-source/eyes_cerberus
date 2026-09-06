@@ -324,6 +324,12 @@ Not started by the daemon. Run by hand during a live incident.
 make check                                      # lint + the whole test suite
 ```
 
+`dryscan` means it: no kill, no chmod, no firewall change, and no state
+either — it will not seed the persistence baseline, the listener baseline, the
+CPU sustain counter or the scan markers. Seeding a baseline is a decision
+("this host is known-good"), and making it silently on a host that may already
+be compromised is the wrong default.
+
 `make lint` is `shellcheck -x -S warning` plus `bash -n` over every supported
 script; `make test` is the `bats` suite under `tests/`. The tests run as an
 ordinary user and never touch the host: each one gets its own

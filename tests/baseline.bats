@@ -190,3 +190,11 @@ setup() {
   DETECT_SETUID=0 run baseline_diff
   [[ "$output" != *"setuid"* ]]
 }
+
+@test "dry run: the persistence baseline is not seeded" {
+  rm -rf "$BASELINE_DIR"; mkdir -p "$BASELINE_DIR"
+  DRY_RUN=1
+  run baseline_diff
+  [[ "$output" != *"SOFT|persistence"* ]]   # log() goes to stderr, findings to stdout
+  [ ! -f "$BASELINE_DIR/units" ]
+}
