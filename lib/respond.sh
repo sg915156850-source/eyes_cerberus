@@ -92,6 +92,73 @@ _kill_pid() {
 }
 
 #---------------------------------------------------------------------------
+# Quarantine review and rollback.
+#
+# Auto-response without a way back is the reason people set AUTO_RESPONSE=0
+# after the first false positive and never turn it on again. Every quarantined
+# file keeps a .metadata sidecar with its original path and permissions, which
+# is all that is needed to undo the containment.
+#---------------------------------------------------------------------------
+
+# quarantine_list : one line per quarantined item -- id, time, reason, path.
+quarantine_list() {
+  local meta id
+  local found=0
+  for meta in "$QUARANTINE_DIR"/*.metadata; do
+    [ -e "$meta" ] || continue
+    found=1
+    id="$(basename "${meta%.metadata}")"
+    printf '%s\t%s\t%s\t%s\n' \
+      "$id" \
+      "$(sed -n 's/^time: //p' "$meta" | head -1)" \
+      "$(sed -n 's/^reason: //p' "$meta" | head -1)" \
+      "$(sed -n 's/^original_path: //p' "$meta" | head -1)"
+  done
+  [ "$found" = 1 ] || return 1
+  return 0
+}
+
+# quarantine_restore <id> : put a quarantined file back where it came from,
+# with the permissions it had. The quarantined copy is authoritative -- the
+# original on disk was left in place but chmod 000, and may have been tampered
+# with since.
+quarantine_restore() {
+  local id="$1"
+  local meta="$QUARANTINE_DIR/${id}.metadata"
+  local copy="$QUARANTINE_DIR/${id}"
+
+  if [ ! -f "$meta" ]; then
+    err "no such quarantine entry: $id"
+    return 1
+  fi
+  if [ ! -f "$copy" ]; then
+    err "metadata for $id exists but the quarantined copy does not"
+    return 1
+  fi
+
+  local orig perms
+  orig="$(sed -n 's/^original_path: //p' "$meta" | head -1)"
+  perms="$(sed -n 's/^perms_before: //p' "$meta" | head -1)"
+  if [ -z "$orig" ]; then
+    err "$meta has no original_path"
+    return 1
+  fi
+  # Restore only to the path it was taken from. An edited metadata file must
+  # not turn this into "write anywhere as root".
+  case "$orig" in
+    /*) ;;
+    *) err "original_path is not absolute: $orig"; return 1 ;;
+  esac
+
+  info "restoring $id -> $orig (perms ${perms:-600})"
+  run_action mkdir -p "$(dirname "$orig")"
+  run_action cp -p "$copy" "$orig" || { err "restore failed"; return 1; }
+  run_action chmod "${perms:-600}" "$orig"
+  emit_event SOFT quarantine_restore "-" "restored $id to $orig with perms ${perms:-600}"
+  return 0
+}
+
+#---------------------------------------------------------------------------
 # handle_finding "SEVERITY|CATEGORY|PID|DETAIL"
 #---------------------------------------------------------------------------
 handle_finding() {

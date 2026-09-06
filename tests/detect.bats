@@ -225,3 +225,75 @@ teardown() {
   run detect_upx_new
   [ -z "$output" ]
 }
+
+@test "high_cpu: the sustain counter does not survive pid reuse" {
+  # The counter used to be keyed by pid alone, so a new process landing on a
+  # recycled pid inherited the CPU history of the one before it.
+  SPAWNED="$(spawn_busy)"
+  fixture ps_cpu "$SPAWNED burner 99.0"
+  CPU_THRESHOLD=1
+  CPU_SUSTAIN_SAMPLES=2
+
+  run detect_high_cpu; [ -z "$output" ]
+
+  # forge the state file as if this pid had been counted under an older
+  # incarnation of the process
+  local st; st="$(_proc_starttime "$SPAWNED")"
+  printf '%s:%s\t99\t0\n' "$SPAWNED" "$(( st + 1 ))" > "$CPU_STATE_FILE"
+
+  run detect_high_cpu
+  [ -z "$output" ]     # the stale count belongs to a different process
+}
+
+@test "_proc_stat_tail is not confused by a comm containing spaces" {
+  # comm is chosen by the process; splitting the raw stat line would let it
+  # shift every field after it.
+  SPAWNED="$(spawn_busy)"
+  run _proc_cpu_jiffies "$SPAWNED"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ^[0-9]+$ ]]
+  run _proc_starttime "$SPAWNED"
+  [[ "$output" =~ ^[0-9]+$ ]]
+
+  # a synthetic stat line in the shape the kernel produces for a hostile comm
+  run bash -c "
+    source '$REPO_ROOT/lib/common.sh' >/dev/null 2>&1
+    source '$REPO_ROOT/lib/detect.sh'
+    line='42 (evil) proc (x) S 1 42 42 0 -1 0 0 0 0 0 111 222 0 0 20 0 1 0 999 0 0'
+    printf '%s' \"\${line##*') '}\"
+  "
+  # state is first after the comm, utime/stime land where the code expects
+  [[ "$output" == "S 1 42"* ]]
+}
+
+@test "malware_hash: a sha256 signature matches too" {
+  local payload="$TEST_TMP/dropper"
+  printf 'malicious\n' > "$payload"
+  chmod 700 "$payload"
+  local sha; sha="$(sha256sum "$payload" | cut -d' ' -f1)"
+  sig malware_sha256.txt "$sha"
+
+  _SUSPECT_DIRS=("$TEST_TMP")
+  run detect_malware_hashes
+  [[ "$output" == *"HARD|malware_hash|-|$payload sha256=$sha"* ]]
+}
+
+@test "malware_hash: signature files are matched case-insensitively" {
+  local payload="$TEST_TMP/dropper"
+  printf 'malicious\n' > "$payload"
+  chmod 700 "$payload"
+  sig malware_sha256.txt "$(sha256sum "$payload" | cut -d' ' -f1 | tr 'a-f' 'A-F')"
+
+  _SUSPECT_DIRS=("$TEST_TMP")
+  run detect_malware_hashes
+  [[ "$output" == *"HARD|malware_hash"* ]]
+}
+
+@test "malware_hash: with no hash signatures at all nothing is scanned" {
+  : > "$CERBERUS_CONF_DIR/signatures/malware_md5.txt"
+  printf 'anything\n' > "$TEST_TMP/x"
+  chmod 700 "$TEST_TMP/x"
+  _SUSPECT_DIRS=("$TEST_TMP")
+  run detect_malware_hashes
+  [ -z "$output" ]
+}

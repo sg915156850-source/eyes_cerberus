@@ -91,6 +91,8 @@ BLOCK_C2_PORTS=0
 DRY_RUN=0
 NOTIFY_METHOD=log
 NOTIFY_MIN_SEVERITY=SOFT
+LOG_MAX_BYTES=10485760
+LOG_KEEP=5
 TG_TOKEN=""
 TG_CHAT=""
 WEBHOOK_URL=""
@@ -143,6 +145,62 @@ iter_pids() {
   done
 }
 
+# --- Log rotation ---------------------------------------------------------
+# events.jsonl and cerberus.log used to grow without limit. On a host that is
+# actually under attack the event rate is exactly when you least want the disk
+# to fill, so the daemon rotates them itself rather than depending on logrotate
+# being installed and configured.
+rotate_logs() {
+  local f sz i
+  for f in "$EVENTS_LOG" "$RUN_LOG"; do
+    [ -f "$f" ] || continue
+    sz="$(stat -c '%s' "$f" 2>/dev/null || echo 0)"
+    [ "$sz" -gt "${LOG_MAX_BYTES:-10485760}" ] || continue
+
+    rm -f "$f.${LOG_KEEP:-5}"
+    for (( i = ${LOG_KEEP:-5} - 1; i >= 1; i-- )); do
+      [ -f "$f.$i" ] && mv -f "$f.$i" "$f.$(( i + 1 ))"
+    done
+    mv -f "$f" "$f.1"
+    : > "$f"
+    chmod 640 "$f" 2>/dev/null || true
+    info "rotated $(basename "$f") at $sz bytes (keeping ${LOG_KEEP:-5})"
+  done
+}
+
+# --- Configuration integrity ----------------------------------------------
+# check_config_perms : refuse to run when the config or the signatures could be
+# modified by someone other than root.
+#
+# etc/cerberus.env is sourced as bash by a root process, and the signature
+# files decide what gets killed and quarantined. Write access to either is
+# root access, or a way to point the responder at a legitimate binary. Running
+# anyway would be worse than not running at all: the host would look defended.
+check_config_perms() {
+  local strict=1 bad=0 f mode owner
+  [ "$(id -u)" = "0" ] || strict=0
+
+  for f in "$CONFIG_FILE" "$WHITELIST_FILE" "$SIG_DIR" "$SIG_DIR"/*.txt; do
+    [ -e "$f" ] || continue
+    mode="$(stat -c '%a' "$f" 2>/dev/null)" || continue
+    owner="$(stat -c '%u' "$f" 2>/dev/null)" || continue
+    if [ $(( 8#$mode & 8#022 )) -ne 0 ]; then
+      err "$f is writable by group or other (mode $mode) -- refusing to trust it"
+      bad=1
+    fi
+    if [ "$strict" = "1" ] && [ "$owner" != "0" ]; then
+      err "$f is owned by uid $owner, not root -- refusing to trust it"
+      bad=1
+    fi
+  done
+
+  if [ "$bad" = "1" ]; then
+    err "fix with: chown -R root:root '$ETC_DIR' && chmod -R go-w '$ETC_DIR'"
+    return 1
+  fi
+  return 0
+}
+
 # --- Signature file helpers -------------------------------------------
 # read_sig <file> : echo non-comment, non-blank lines (trimmed).
 read_sig() {
@@ -159,16 +217,47 @@ is_whitelisted() {
 }
 
 # --- Event record + notification --------------------------------------
+# json_escape <string> : the string as a JSON string literal, quotes included.
+#
+# Pure bash on purpose. This used to shell out to python3 on every single
+# event -- a dependency that was never declared, with a sed fallback that did
+# not escape newlines or control characters. Since the detail field is built
+# from process argv, an attacker chose whether events.jsonl stayed parseable:
+# one newline in a command line split the record in two and every consumer of
+# the log saw a truncated event.
+json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"      # backslash first, or it doubles the escapes below
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\r'/\\r}"
+  s="${s//$'\t'/\\t}"
+  s="${s//$'\b'/\\b}"
+  s="${s//$'\f'/\\f}"
+
+  # Anything else below 0x20 (plus DEL) has to become \u00xx. Rare, so the
+  # per-character loop only runs when one is actually present.
+  if [[ "$s" == *[[:cntrl:]]* ]]; then
+    local out="" i c
+    for (( i = 0; i < ${#s}; i++ )); do
+      c="${s:i:1}"
+      [[ "$c" == [[:cntrl:]] ]] && printf -v c '\\u%04x' "'$c"
+      out+="$c"
+    done
+    s="$out"
+  fi
+  printf '"%s"' "$s"
+}
+
 # emit_event <severity> <category> <pid> <detail>
 # Appends a JSON line to events.jsonl and forwards to notify() when the
 # severity clears NOTIFY_MIN_SEVERITY.
 emit_event() {
   local sev="$1" cat="$2" pid="$3" detail="$4"
   local ts; ts="$(date -Iseconds)"
-  local esc_detail
-  esc_detail="$(printf '%s' "$detail" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' 2>/dev/null || printf '"%s"' "$(printf '%s' "$detail" | sed 's/"/\\"/g')")"
-  printf '{"ts":"%s","severity":"%s","category":"%s","pid":"%s","detail":%s}\n' \
-    "$ts" "$sev" "$cat" "$pid" "$esc_detail" >> "$EVENTS_LOG"
+  printf '{"ts":%s,"severity":%s,"category":%s,"pid":%s,"detail":%s}\n' \
+    "$(json_escape "$ts")" "$(json_escape "$sev")" "$(json_escape "$cat")" \
+    "$(json_escape "$pid")" "$(json_escape "$detail")" >> "$EVENTS_LOG"
 
   if [ "$sev" = "HARD" ] || [ "$NOTIFY_MIN_SEVERITY" = "SOFT" ]; then
     notify "$sev" "[$sev/$cat] pid=$pid $detail"

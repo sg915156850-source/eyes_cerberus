@@ -16,6 +16,40 @@ UPX_MARKER="$STATE_DIR/.upxscan_marker"
 _SUSPECT_DIRS=(/tmp /var/tmp /dev/shm)
 
 #---------------------------------------------------------------------------
+# /proc/<pid>/stat fields, counted from `state` (field 3) onward.
+#
+# Splitting the raw line on whitespace is wrong and exploitable: comm is
+# field 2, it is chosen by the process, and it may contain spaces and
+# parentheses. Everything after the last ") " is safe to split.
+#   field N  ->  index N-3
+#---------------------------------------------------------------------------
+_proc_stat_tail() {
+  local line
+  line="$(cat "/proc/$1/stat" 2>/dev/null)" || return 1
+  [ -n "$line" ] || return 1
+  case "$line" in
+    *") "*) printf '%s' "${line##*") "}" ;;
+    *)      return 1 ;;
+  esac
+}
+
+# _proc_cpu_jiffies <pid> : utime + stime (fields 14, 15).
+_proc_cpu_jiffies() {
+  local -a fields
+  read -r -a fields <<< "$(_proc_stat_tail "$1")" || return 1
+  [ -n "${fields[12]:-}" ] || return 1
+  printf '%s' "$(( ${fields[11]} + ${fields[12]} ))"
+}
+
+# _proc_starttime <pid> : field 22, the boot-relative start time. Together with
+# the pid it identifies a process across pid reuse.
+_proc_starttime() {
+  local -a fields
+  read -r -a fields <<< "$(_proc_stat_tail "$1")" || return 1
+  printf '%s' "${fields[19]:-0}"
+}
+
+#---------------------------------------------------------------------------
 # Instantaneous CPU for a batch of PIDs (per-core %, may exceed 100).
 # Usage: inst_cpu_batch pid1 pid2 ...  -> prints "pid cpu" lines
 #---------------------------------------------------------------------------
@@ -26,14 +60,14 @@ inst_cpu_batch() {
   declare -A t0 j0
   local p j
   for p in "${pids[@]}"; do
-    j="$(awk '{print $14+$15}' "/proc/$p/stat" 2>/dev/null || echo "")"
+    j="$(_proc_cpu_jiffies "$p" 2>/dev/null || echo "")"
     [ -n "$j" ] && { j0["$p"]="$j"; t0["$p"]="$(date +%s%N)"; }
   done
   sleep 0.5
   for p in "${pids[@]}"; do
     [ -n "${j0[$p]:-}" ] || continue
     local j1 t1 dj dt
-    j1="$(awk '{print $14+$15}' "/proc/$p/stat" 2>/dev/null || echo "")"
+    j1="$(_proc_cpu_jiffies "$p" 2>/dev/null || echo "")"
     [ -n "$j1" ] || continue
     t1="$(date +%s%N)"
     dj=$(( j1 - ${j0[$p]} ))
@@ -58,14 +92,54 @@ detect_malware_paths() {
 }
 
 #---------------------------------------------------------------------------
+# Known-malware hashes. Two lists, either of which is enough to call a file
+# known-bad: md5 for the indicators that were recorded that way, sha256 for
+# everything since (an md5 collision is cheap to produce).
+#---------------------------------------------------------------------------
+_KNOWN_MD5=()
+_KNOWN_SHA256=()
+
+_load_hash_sigs() {
+  mapfile -t _KNOWN_MD5    < <(read_sig malware_md5.txt    | tr 'A-F' 'a-f')
+  mapfile -t _KNOWN_SHA256 < <(read_sig malware_sha256.txt | tr 'A-F' 'a-f')
+}
+
+_have_hash_sigs() {
+  [ "${#_KNOWN_MD5[@]}" -gt 0 ] || [ "${#_KNOWN_SHA256[@]}" -gt 0 ]
+}
+
+# _match_known_hash <file> : prints "md5=<h>" or "sha256=<h>" for a match and
+# returns 0, otherwise returns 1. Each digest is computed only if there is a
+# list to compare it against.
+_match_known_hash() {
+  local file="$1" h m
+  if [ "${#_KNOWN_MD5[@]}" -gt 0 ]; then
+    h="$(md5sum "$file" 2>/dev/null | cut -d' ' -f1)"
+    if [ -n "$h" ]; then
+      for m in "${_KNOWN_MD5[@]}"; do
+        [ "$h" = "$m" ] && { printf 'md5=%s' "$h"; return 0; }
+      done
+    fi
+  fi
+  if [ "${#_KNOWN_SHA256[@]}" -gt 0 ]; then
+    h="$(sha256sum "$file" 2>/dev/null | cut -d' ' -f1)"
+    if [ -n "$h" ]; then
+      for m in "${_KNOWN_SHA256[@]}"; do
+        [ "$h" = "$m" ] && { printf 'sha256=%s' "$h"; return 0; }
+      done
+    fi
+  fi
+  return 1
+}
+
+#---------------------------------------------------------------------------
 # HARD: file on disk whose hash matches a known-malware signature.
 # Narrow scope: the suspect dirs + any */.next/standalone under /root/*.
 # Full hash on the first pass, then only files newer than the last marker.
 #---------------------------------------------------------------------------
 detect_malware_hashes() {
-  local -a md5s
-  mapfile -t md5s < <(read_sig malware_md5.txt)
-  [ "${#md5s[@]}" -eq 0 ] && return 0
+  _load_hash_sigs
+  _have_hash_sigs || return 0
 
   local -a roots=("${_SUSPECT_DIRS[@]}")
   local d
@@ -74,17 +148,11 @@ detect_malware_hashes() {
   local find_args=(-type f -perm -u+x -size -80M)
   [ -f "$HASH_MARKER" ] && find_args+=(-newer "$HASH_MARKER")
 
-  local f h
+  local f hit
   while IFS= read -r -d '' f; do
-    h="$(md5sum "$f" 2>/dev/null | cut -d' ' -f1)"
-    [ -n "$h" ] || continue
-    local m
-    for m in "${md5s[@]}"; do
-      if [ "$h" = "$m" ]; then
-        echo "HARD|malware_hash|-|${f} md5=${h}"
-        break
-      fi
-    done
+    if hit="$(_match_known_hash "$f")"; then
+      echo "HARD|malware_hash|-|${f} ${hit}"
+    fi
   done < <(find "${roots[@]}" "${find_args[@]}" -print0 2>/dev/null)
 
   run_action touch "$HASH_MARKER"
@@ -112,9 +180,8 @@ _is_standard_path() {
   esac
 }
 detect_proc_exe() {
-  local -a md5s
-  mapfile -t md5s < <(read_sig malware_md5.txt)
-  local pid exe origin h m
+  _load_hash_sigs
+  local pid exe origin hit
   while read -r pid; do
     exe="$(readlink "/proc/$pid/exe" 2>/dev/null || true)"
     [ -n "$exe" ] || continue
@@ -127,11 +194,11 @@ detect_proc_exe() {
         continue ;;
     esac
     _is_volatile_path "$exe" || continue
-    if [ "${#md5s[@]}" -gt 0 ] && [ -r "$exe" ]; then
-      h="$(md5sum "$exe" 2>/dev/null | cut -d' ' -f1)"
-      for m in "${md5s[@]}"; do
-        [ "$h" = "$m" ] && { echo "HARD|malware_proc|$pid|$exe md5=$h"; continue 2; }
-      done
+    if _have_hash_sigs && [ -r "$exe" ]; then
+      if hit="$(_match_known_hash "$exe")"; then
+        echo "HARD|malware_proc|$pid|$exe $hit"
+        continue
+      fi
     fi
     echo "SOFT|exe_in_volatile|$pid|executable under volatile dir: $exe"
   done < <(iter_pids)
@@ -230,27 +297,32 @@ detect_high_cpu() {
     while read -r p c; do now["$p"]="$c"; done < <(inst_cpu_batch "${cand[@]}")
   fi
 
-  # load previous sustain counts
+  # Load previous sustain counts. The key is pid:starttime, not the pid alone:
+  # pids are reused, and a short-lived process inheriting the count of the
+  # last hog would be reported for CPU it never used. Entries whose process is
+  # gone simply never get rewritten below.
   declare -A prev=() emitted=()
   if [ -f "$CPU_STATE_FILE" ]; then
-    while IFS=$'\t' read -r p cnt em; do
-      [ -n "$p" ] && { prev["$p"]="$cnt"; emitted["$p"]="$em"; }
+    while IFS=$'\t' read -r key cnt em; do
+      [ -n "$key" ] && { prev["$key"]="$cnt"; emitted["$key"]="$em"; }
     done < "$CPU_STATE_FILE"
   fi
 
   : > "$CPU_STATE_FILE.tmp"
-  local p cpu cnt em args
+  local p cpu cnt em args key st
   for p in "${!now[@]}"; do
     cpu="${now[$p]}"
     awk -v v="$cpu" -v t="$CPU_THRESHOLD" 'BEGIN{exit !(v+0>t)}' || continue
-    cnt=$(( ${prev[$p]:-0} + 1 ))
-    em="${emitted[$p]:-0}"
+    st="$(_proc_starttime "$p" 2>/dev/null || echo 0)"
+    key="$p:$st"
+    cnt=$(( ${prev[$key]:-0} + 1 ))
+    em="${emitted[$key]:-0}"
     if [ "$cnt" -ge "${CPU_SUSTAIN_SAMPLES:-4}" ] && [ "$em" != "1" ]; then
       args="$(ps -p "$p" -o comm=,args= 2>/dev/null | tr -s ' ')"
       echo "SOFT|high_cpu|$p|sustained ${cpu}% CPU over ${cnt} samples: ${args}"
       em=1
     fi
-    printf '%s\t%s\t%s\n' "$p" "$cnt" "$em" >> "$CPU_STATE_FILE.tmp"
+    printf '%s\t%s\t%s\n' "$key" "$cnt" "$em" >> "$CPU_STATE_FILE.tmp"
   done
   mv "$CPU_STATE_FILE.tmp" "$CPU_STATE_FILE"
 }

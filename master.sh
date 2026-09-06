@@ -82,6 +82,34 @@ cmd_digest() {
   tail -n 5 "$EVENTS" 2>/dev/null | sed 's/^/  /'
 }
 
+# Restoring a file that was quarantined for a reason deserves a deliberate
+# keystroke. --force skips it for scripted use.
+cmd_restore() {
+  local id="${1:-}" force="${2:-}"
+  [ -n "$id" ] || { say_bad "usage: $0 restore <id> [--force]"; return 2; }
+
+  local meta="$QUARANTINE_DIR/${id}.metadata"
+  [ -f "$meta" ] || { say_bad "no such quarantine entry: $id"; return 1; }
+
+  echo "About to restore:"
+  sed 's/^/  /' "$meta"
+  echo
+
+  if [ "$force" != "--force" ]; then
+    if [ ! -t 0 ]; then
+      say_bad "not a terminal and --force not given; refusing"
+      return 1
+    fi
+    local answer=""
+    read -r -p "Put this file back where it came from? [y/N] " answer
+    case "$answer" in
+      y|Y|yes|YES) ;;
+      *) say_warn "aborted"; return 1 ;;
+    esac
+  fi
+  exec "$ROOT/cerberus.sh" quarantine restore "$id"
+}
+
 case "${1:-status}" in
   status)  cmd_status ;;
   start)   have_unit && exec systemctl start   "$UNIT" || exec "$ROOT/cerberus.sh" run ;;
@@ -90,6 +118,19 @@ case "${1:-status}" in
   scan)    exec "$ROOT/cerberus.sh" scan ;;
   dryscan) exec "$ROOT/cerberus.sh" dryscan ;;
   baseline) exec "$ROOT/cerberus.sh" baseline ;;
+  quarantine)
+    shift
+    if [ $# -eq 0 ]; then
+      printf '%-46s  %-26s  %-18s  %s\n' ID TIME REASON ORIGINAL
+      "$ROOT/cerberus.sh" quarantine list \
+        | while IFS=$'\t' read -r id t reason orig; do
+            printf '%-46s  %-26s  %-18s  %s\n' "$id" "$t" "$reason" "$orig"
+          done
+    else
+      exec "$ROOT/cerberus.sh" quarantine "$@"
+    fi
+    ;;
+  restore) shift; cmd_restore "$@" ;;
   digest)  cmd_digest "${2:-1}" ;;
   logs)    exec journalctl -u "$UNIT" -n "${2:-100}" --no-pager ;;
   help|*)
@@ -102,6 +143,8 @@ Usage: $0 <command>
   scan           run one detect+respond pass now
   dryscan        run one detect pass, print findings, take no action
   baseline       rebuild the persistence baseline (do this after a clean review)
+  quarantine     list what has been contained
+  restore <id>   put a quarantined file back (prompts; --force to skip)
   digest [days]  summarise state/events.jsonl (default 1 day)
   logs [n]       journalctl for the unit (default 100 lines)
 EOF

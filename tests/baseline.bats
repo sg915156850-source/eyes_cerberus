@@ -84,3 +84,34 @@ setup() {
   DETECT_PERSISTENCE=0 CERBERUS_PASS=0 run detect_persistence
   [ -z "$output" ]
 }
+
+@test "an existing ld.so.preload is captured, not printed as a finding" {
+  # The capture writes to files; its stdout is the detector's finding stream.
+  # A bare path leaking onto it would be parsed as SEVERITY|CATEGORY|PID|DETAIL.
+  LD_PRELOAD_FILE="$TEST_TMP/ld.so.preload"
+  printf '/lib/evil.so\n' > "$LD_PRELOAD_FILE"
+
+  run _baseline_capture "$TEST_TMP/snap"
+  [ -z "$output" ]
+  run cat "$TEST_TMP/snap/ld_preload"
+  [ "$output" = "/lib/evil.so" ]
+}
+
+@test "a new ld.so.preload entry is reported as persistence" {
+  LD_PRELOAD_FILE="$TEST_TMP/ld.so.preload"
+  : > "$LD_PRELOAD_FILE"
+  baseline_build
+  printf '/tmp/rootkit.so\n' > "$LD_PRELOAD_FILE"
+
+  run baseline_diff
+  [[ "$output" == *"new in ld_preload: /tmp/rootkit.so"* ]]
+}
+
+@test "no ld.so.preload on the host is not an error" {
+  LD_PRELOAD_FILE="$TEST_TMP/absent"
+  run _baseline_capture "$TEST_TMP/snap"
+  [ -z "$output" ]
+  [ -f "$TEST_TMP/snap/ld_preload" ]
+  run cat "$TEST_TMP/snap/ld_preload"
+  [ -z "$output" ]
+}

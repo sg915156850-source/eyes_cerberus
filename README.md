@@ -63,7 +63,8 @@ lib/
 etc/
   cerberus.env.example   copy to cerberus.env and edit (cerberus.env is git-ignored)
   whitelist.txt          process names exempt from CPU/miner heuristics
-  signatures/            malware_md5, c2_ips, c2_ports, miner_patterns, malware_paths
+  signatures/            malware_md5, malware_sha256, c2_ips, c2_ports,
+                         miner_patterns, malware_paths
 systemd/                 eyes-cerberus.service + eyes-cerberus-failure.service
 ir/                      MANUAL incident-response tools (not run by the daemon)
   quick_response.sh  emergency_remediation.sh  docker/
@@ -82,7 +83,7 @@ state/                   runtime (git-ignored): events.jsonl, evidence/, quarant
 | Category | Trigger | Response |
 |---|---|---|
 | `malware_path` | file at a path in `signatures/malware_paths.txt`, perms ≠ `000` | quarantine copy, `chmod 000` original (not deleted), kill anything executing it |
-| `malware_hash` | file under `/tmp /var/tmp /dev/shm` or `/root/*/.next/standalone` matching `signatures/malware_md5.txt` | quarantine + `chmod 000` |
+| `malware_hash` | file under `/tmp /var/tmp /dev/shm` or `/root/*/.next/standalone` matching `signatures/malware_md5.txt` or `signatures/malware_sha256.txt` | quarantine + `chmod 000` |
 | `malware_proc` | a process whose exe is in a volatile dir **and** matches a known hash | kill + quarantine the binary |
 | `c2_beacon` | `nc`/`ncat`/`socat` argv contains a known C2 IP or suspicious port | re-apply C2 firewall + kill |
 | `c2_socket` | an established outbound socket to a known C2 IP (any client) | re-apply C2 firewall + kill |
@@ -190,7 +191,26 @@ and `netfilter-persistent save` — that step is left to you.
 ./master.sh logs 200       # journalctl -u eyes-cerberus
 ./master.sh baseline       # rebuild the persistence baseline — do this ONLY after
                            # reviewing the current host state as known-good
+./master.sh quarantine     # what has been contained, and when
+./master.sh restore <id>   # put one of them back (prompts first)
 ```
+
+### Undoing a containment
+
+Auto-response is only safe if it is reversible. Every quarantined file keeps a
+`.metadata` sidecar with its original path, permissions and hashes, and
+`restore` uses it to put the file back exactly as it was:
+
+```bash
+./master.sh quarantine
+ID                                              TIME                        REASON              ORIGINAL
+20260906_141233_let_ac65b89c...                 2026-09-06T14:12:33+00:00   HARD/malware_path   /tmp/let
+./master.sh restore 20260906_141233_let_ac65b89c...
+```
+
+The quarantined copy is authoritative, not the neutralised original — the file
+left on disk at `chmod 000` may have been touched since. Restoring is recorded
+in `events.jsonl` like any other action.
 
 After a legitimate change (new service, new cron job, new listening port) you
 will get one `persistence` / `new_listener` alert, then run `./master.sh baseline`
@@ -215,10 +235,18 @@ can tell the loop is alive even when nothing fires.
 | `NOTIFY_METHOD` | `log` | `log` \| `telegram` \| `webhook` \| `email` (+ `TG_TOKEN`/`TG_CHAT`, `WEBHOOK_URL`, `EMAIL_TO`) |
 | `NOTIFY_MIN_SEVERITY` | `SOFT` | `HARD` to mute SOFT notifications (still recorded in `events.jsonl`) |
 | `DETECT_HIGH_CPU` / `DETECT_NEW_LISTENER` / `DETECT_PERSISTENCE` / `DETECT_UPX_NEW` | `1` | toggle individual SOFT detectors |
+| `LOG_MAX_BYTES` / `LOG_KEEP` | `10485760` / `5` | rotate `events.jsonl` and `cerberus.log` past this size, keeping N generations |
 | `DETECT_EGRESS` | `0` | outbound-connection watch — noisy, opt-in |
 
 Signatures are plain text, one entry per line, `#` comments — edit and the daemon
 picks them up on the next pass (no restart needed).
+
+`cerberus.env` is sourced as bash by a root process and the signature files
+decide what gets killed, so write access to either is root access. The daemon
+checks this at startup and refuses to run if anything under the config
+directory is writable by group or other, or is not owned by root. `dryscan`
+warns instead of refusing — it takes no action, and it is the command you want
+while fixing exactly that.
 
 ---
 

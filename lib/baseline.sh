@@ -7,6 +7,10 @@
 # Sourced after lib/common.sh.
 #===============================================================================
 
+# Overridable so the tests can point it somewhere writable; on a real host it
+# is always /etc/ld.so.preload.
+LD_PRELOAD_FILE="${LD_PRELOAD_FILE:-/etc/ld.so.preload}"
+
 # Sources we watch. Each becomes one file under state/baseline/.
 _baseline_capture() {
   local dst="$1"
@@ -34,7 +38,16 @@ _baseline_capture() {
     [ -f "$f" ] && sha256sum "$f" 2>/dev/null
   done | sort > "$dst/root_shell_rc" || true
 
-  ls -1 /etc/ld.so.preload 2>/dev/null && cat /etc/ld.so.preload 2>/dev/null > "$dst/ld_preload" || : > "$dst/ld_preload"
+  # `ls -1 /etc/ld.so.preload && cat ... > file` used to print the path on
+  # stdout whenever the file existed. _baseline_capture's stdout is the
+  # detector's finding stream, so on a host that actually has an ld.so.preload
+  # -- the case this check exists for -- that bare path was parsed as a
+  # finding, with the path itself landing in the severity field.
+  if [ -f "$LD_PRELOAD_FILE" ]; then
+    cat "$LD_PRELOAD_FILE" 2>/dev/null > "$dst/ld_preload" || : > "$dst/ld_preload"
+  else
+    : > "$dst/ld_preload"
+  fi
 }
 
 # baseline_build : (re)create the reference snapshot. Call after a known-good

@@ -122,3 +122,100 @@ setup() {
   run bash -c "source '$REPO_ROOT/lib/common.sh' >/dev/null 2>&1; iter_pids | grep -cvE '^[0-9]+$'"
   [ "$output" = "0" ]
 }
+
+@test "json_escape produces exactly what a JSON parser expects" {
+  # Round-trip through jq: whatever goes in must come back byte for byte.
+  local cases=(
+    'plain'
+    'quote " inside'
+    'backslash \ inside'
+    'both \" together'
+    'tab	and newline
+here'
+    'unicode: привет ✓'
+    'slash / and control'
+  )
+  local c esc back
+  for c in "${cases[@]}"; do
+    esc="$(json_escape "$c")"
+    back="$(printf '%s' "$esc" | jq -er . )" || {
+      echo "not valid JSON: $esc" >&2
+      return 1
+    }
+    [ "$back" = "$c" ] || {
+      echo "round trip changed the value: [$c] -> [$back]" >&2
+      return 1
+    }
+  done
+}
+
+@test "json_escape does not call python3" {
+  # It used to shell out per event, on an undeclared dependency.
+  printf '#!/bin/sh\nexit 42\n' > "$SHIM_DIR/python3"
+  chmod +x "$SHIM_DIR/python3"
+  emit_event SOFT miner 1 'detail with "quotes" and \backslash'
+  run jq -er '.detail' "$EVENTS_LOG"
+  [ "$output" = 'detail with "quotes" and \backslash' ]
+}
+
+@test "an event line is always exactly one line" {
+  emit_event HARD c2_beacon 1 "$(printf 'first\nsecond\nthird')"
+  emit_event HARD c2_beacon 2 "plain"
+  run wc -l < "$EVENTS_LOG"
+  [ "$output" = "2" ]
+  run jq -es 'length' "$EVENTS_LOG"
+  [ "$output" = "2" ]
+}
+
+@test "rotate_logs rotates past the size limit and keeps LOG_KEEP generations" {
+  LOG_MAX_BYTES=100
+  LOG_KEEP=2
+  head -c 500 /dev/zero | tr '\0' 'x' > "$EVENTS_LOG"
+
+  rotate_logs
+  [ -f "$EVENTS_LOG.1" ]
+  run stat -c '%s' "$EVENTS_LOG"
+  [ "$output" = "0" ]
+
+  head -c 500 /dev/zero | tr '\0' 'y' > "$EVENTS_LOG"
+  rotate_logs
+  [ -f "$EVENTS_LOG.2" ]
+
+  head -c 500 /dev/zero | tr '\0' 'z' > "$EVENTS_LOG"
+  rotate_logs
+  [ ! -f "$EVENTS_LOG.3" ]      # LOG_KEEP=2 means two, not three
+}
+
+@test "rotate_logs leaves a small log alone" {
+  LOG_MAX_BYTES=1000000
+  emit_event SOFT miner 1 "small"
+  rotate_logs
+  [ ! -f "$EVENTS_LOG.1" ]
+  run wc -l < "$EVENTS_LOG"
+  [ "$output" = "1" ]
+}
+
+@test "check_config_perms rejects a config anyone can rewrite" {
+  : > "$CONFIG_FILE"
+  chmod 666 "$CONFIG_FILE"
+  run check_config_perms
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"writable by group or other"* ]]
+}
+
+@test "check_config_perms rejects a world-writable signature file" {
+  sig c2_ips.txt "203.0.113.9"
+  chmod 646 "$CERBERUS_CONF_DIR/signatures/c2_ips.txt"
+  run check_config_perms
+  [ "$status" -ne 0 ]
+}
+
+@test "check_config_perms accepts a properly locked down config" {
+  : > "$CONFIG_FILE"
+  chmod 600 "$CONFIG_FILE"
+  chmod 750 "$CERBERUS_CONF_DIR" "$SIG_DIR"
+  sig c2_ips.txt "203.0.113.9"
+  chmod 640 "$SIG_DIR"/*.txt
+  run check_config_perms
+  [ "$status" -eq 0 ]
+}

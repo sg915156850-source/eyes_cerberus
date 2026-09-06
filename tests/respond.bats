@@ -153,3 +153,92 @@ teardown() {
   run _pids_executing "$payload"
   [[ "$output" != *"$SPAWNED"* ]]
 }
+
+# --- rollback --------------------------------------------------------------
+
+@test "quarantine_list reports nothing when nothing has been contained" {
+  run quarantine_list
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+@test "quarantine_list shows the original path and reason" {
+  local payload="$TEST_TMP/let"
+  printf 'payload\n' > "$payload"; chmod 755 "$payload"
+  AUTO_RESPONSE=1 DRY_RUN=0 handle_finding "HARD|malware_path|-|$payload perms=755"
+
+  run quarantine_list
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$payload"* ]]
+  [[ "$output" == *"HARD/malware_path"* ]]
+}
+
+@test "restore puts the file back with the permissions it had" {
+  local payload="$TEST_TMP/let"
+  printf 'the original bytes\n' > "$payload"; chmod 755 "$payload"
+  AUTO_RESPONSE=1 DRY_RUN=0 handle_finding "HARD|malware_path|-|$payload perms=755"
+
+  run stat -c '%a' "$payload"
+  [ "$output" = "0" ]
+
+  local id; id="$(quarantine_list | cut -f1)"
+  run quarantine_restore "$id"
+  [ "$status" -eq 0 ]
+
+  run stat -c '%a' "$payload"
+  [ "$output" = "755" ]
+  run cat "$payload"
+  [ "$output" = "the original bytes" ]
+}
+
+@test "restore works even if the original was deleted afterwards" {
+  local payload="$TEST_TMP/let"
+  printf 'content\n' > "$payload"; chmod 700 "$payload"
+  AUTO_RESPONSE=1 DRY_RUN=0 handle_finding "HARD|malware_path|-|$payload perms=700"
+  rm -f "$payload"
+
+  local id; id="$(quarantine_list | cut -f1)"
+  quarantine_restore "$id"
+  [ -f "$payload" ]
+  run cat "$payload"
+  [ "$output" = "content" ]
+}
+
+@test "restore records what it did" {
+  local payload="$TEST_TMP/let"
+  printf 'content\n' > "$payload"; chmod 700 "$payload"
+  AUTO_RESPONSE=1 DRY_RUN=0 handle_finding "HARD|malware_path|-|$payload perms=700"
+  local id; id="$(quarantine_list | cut -f1)"
+  quarantine_restore "$id"
+
+  run jq -esr '[.[] | select(.category == "quarantine_restore")] | length' "$EVENTS_LOG"
+  [ "$output" = "1" ]
+}
+
+@test "restore refuses an unknown id" {
+  run quarantine_restore "20200101_000000_nope_deadbeef"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no such quarantine entry"* ]]
+}
+
+@test "restore refuses a metadata file pointing outside an absolute path" {
+  # The metadata sidecar sits in a directory only root can write, but a
+  # restore that trusts it blindly would be "write anywhere as root".
+  local id="20200101_000000_evil_deadbeef"
+  printf 'payload\n' > "$QUARANTINE_DIR/$id"
+  printf 'original_path: ../../etc/cron.d/backdoor\nperms_before: 755\n' \
+    > "$QUARANTINE_DIR/$id.metadata"
+
+  run quarantine_restore "$id"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not absolute"* ]]
+  [ ! -e "$TEST_TMP/../../etc/cron.d/backdoor" ]
+}
+
+@test "restore refuses when the quarantined copy is missing" {
+  local id="20200101_000000_gone_deadbeef"
+  printf 'original_path: /tmp/x\nperms_before: 755\n' > "$QUARANTINE_DIR/$id.metadata"
+  run quarantine_restore "$id"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"quarantined copy does not"* ]]
+}
