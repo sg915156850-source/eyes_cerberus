@@ -16,8 +16,8 @@ apply_c2_firewall() {
   local ip port
   while read -r ip; do
     [ -n "$ip" ] || continue
-    iptables -C OUTPUT -d "$ip" -j DROP 2>/dev/null || run iptables -A OUTPUT -d "$ip" -j DROP
-    iptables -C INPUT  -s "$ip" -j DROP 2>/dev/null || run iptables -A INPUT  -s "$ip" -j DROP
+    iptables -C OUTPUT -d "$ip" -j DROP 2>/dev/null || run_action iptables -A OUTPUT -d "$ip" -j DROP
+    iptables -C INPUT  -s "$ip" -j DROP 2>/dev/null || run_action iptables -A INPUT  -s "$ip" -j DROP
   done < <(read_sig c2_ips.txt)
 
   # Port DROPs are opt-in (BLOCK_C2_PORTS=1): an OUTPUT --dport rule blocks
@@ -28,7 +28,7 @@ apply_c2_firewall() {
   while read -r port; do
     [ -n "$port" ] || continue
     iptables -C OUTPUT -p tcp --dport "$port" -j DROP 2>/dev/null || \
-      run iptables -A OUTPUT -p tcp --dport "$port" -j DROP
+      run_action iptables -A OUTPUT -p tcp --dport "$port" -j DROP
   done < <(read_sig c2_ports.txt)
 }
 
@@ -41,20 +41,28 @@ _quarantine_file() {
   hash="$(md5sum "$f" 2>/dev/null | cut -d' ' -f1)"
   base="$(basename "$f")"
   dst="$QUARANTINE_DIR/${ts}_${base}_${hash}"
-  {
-    echo "original_path: $f"
-    echo "quarantine_copy: $dst"
-    echo "reason: $reason"
-    echo "time: $(date -Iseconds)"
-    echo "md5: $hash"
-    echo "sha256: $(sha256sum "$f" 2>/dev/null | cut -d' ' -f1)"
-    echo "perms_before: $(stat -c '%a' "$f" 2>/dev/null)"
-    echo "owner: $(stat -c '%U:%G' "$f" 2>/dev/null)"
-    echo "size: $(stat -c '%s' "$f" 2>/dev/null)"
-  } > "${dst}.metadata"
-  run cp -p "$f" "$dst" && run chmod 000 "$dst"
+
+  # The metadata write goes through the same dry-run gate as everything else.
+  # It used to sit outside it, so a --dryscan left files behind in the
+  # quarantine directory -- a dry run that writes is not a dry run.
+  if [ "$DRY_RUN" = "1" ]; then
+    log DRY "write ${dst}.metadata"
+  else
+    {
+      echo "original_path: $f"
+      echo "quarantine_copy: $dst"
+      echo "reason: $reason"
+      echo "time: $(date -Iseconds)"
+      echo "md5: $hash"
+      echo "sha256: $(sha256sum "$f" 2>/dev/null | cut -d' ' -f1)"
+      echo "perms_before: $(stat -c '%a' "$f" 2>/dev/null)"
+      echo "owner: $(stat -c '%U:%G' "$f" 2>/dev/null)"
+      echo "size: $(stat -c '%s' "$f" 2>/dev/null)"
+    } > "${dst}.metadata"
+  fi
+  run_action cp -p "$f" "$dst" && run_action chmod 000 "$dst"
   # neutralise the original in place; keep it for forensics (do NOT delete)
-  run chmod 000 "$f" && info "neutralised original: $f (chmod 000)"
+  run_action chmod 000 "$f" && info "neutralised original: $f (chmod 000)"
 }
 
 # _pids_executing <path> : PIDs whose /proc/<pid>/exe resolves to <path>.
@@ -74,13 +82,13 @@ _pids_executing() {
 _kill_pid() {
   local pid="$1"
   kill -0 "$pid" 2>/dev/null || { info "pid $pid already gone"; return 0; }
-  run kill -TERM "$pid"
+  run_action kill -TERM "$pid"
   for _ in 1 2 3 4 5; do
     kill -0 "$pid" 2>/dev/null || { info "pid $pid stopped after SIGTERM"; return 0; }
     sleep 1
   done
-  run kill -KILL "$pid" && info "pid $pid SIGKILLed"
-  run pkill -KILL -P "$pid" 2>/dev/null || true
+  run_action kill -KILL "$pid" && info "pid $pid SIGKILLed"
+  run_action pkill -KILL -P "$pid" 2>/dev/null || true
 }
 
 #---------------------------------------------------------------------------

@@ -87,7 +87,7 @@ detect_malware_hashes() {
     done
   done < <(find "${roots[@]}" "${find_args[@]}" -print0 2>/dev/null)
 
-  run touch "$HASH_MARKER"
+  run_action touch "$HASH_MARKER"
 }
 
 #---------------------------------------------------------------------------
@@ -298,7 +298,7 @@ detect_upx_new() {
       echo "SOFT|upx_new|-|UPX-packed executable: $f ($(md5sum "$f" 2>/dev/null | cut -d' ' -f1))"
     fi
   done < <(find "${_SUSPECT_DIRS[@]}" "${find_args[@]}" -print0 2>/dev/null)
-  run touch "$UPX_MARKER"
+  run_action touch "$UPX_MARKER"
 }
 
 #---------------------------------------------------------------------------

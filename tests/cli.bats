@@ -1,0 +1,100 @@
+#!/usr/bin/env bats
+# The entry points: cerberus.sh, master.sh, install.sh.
+
+setup() {
+  load helper
+  cerberus_setup
+  fixture ps_args ""
+  fixture ps_cpu ""
+  fixture crontab_out ""
+  fixture systemctl_unit_files ""
+  fixture systemctl_units_running ""
+}
+
+@test "cerberus.sh version prints the version" {
+  run "$REPO_ROOT/cerberus.sh" version
+  [ "$status" -eq 0 ]
+  [[ "$output" == "eyes-cerberus "* ]]
+}
+
+@test "cerberus.sh with an unknown command fails and prints usage" {
+  run "$REPO_ROOT/cerberus.sh" not-a-command
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Usage:"* ]]
+}
+
+@test "dryscan takes no action and writes no events" {
+  local payload="$TEST_TMP/let"
+  printf 'payload\n' > "$payload"
+  chmod 755 "$payload"
+  sig malware_paths.txt "$payload"
+
+  run "$REPO_ROOT/cerberus.sh" dryscan
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"HARD|malware_path"* ]]
+
+  # the whole point of dryscan: the payload is reported, not touched
+  run stat -c '%a' "$payload"
+  [ "$output" = "755" ]
+  [ ! -s "$CERBERUS_STATE_DIR/events.jsonl" ]
+  run bash -c "ls -A '$CERBERUS_STATE_DIR/quarantine' | wc -l"
+  [ "$output" = "0" ]
+}
+
+@test "scan acts on what dryscan only reported" {
+  local payload="$TEST_TMP/let"
+  printf 'payload\n' > "$payload"
+  chmod 755 "$payload"
+  sig malware_paths.txt "$payload"
+
+  run "$REPO_ROOT/cerberus.sh" scan
+  [ "$status" -eq 0 ]
+
+  run stat -c '%a' "$payload"
+  [ "$output" = "0" ]
+  run jq -er '.category' "$CERBERUS_STATE_DIR/events.jsonl"
+  [ "$output" = "malware_path" ]
+}
+
+@test "notify-failure records that the daemon stopped watching" {
+  run "$REPO_ROOT/cerberus.sh" notify-failure
+  [ "$status" -eq 0 ]
+  run jq -er '.severity + "/" + .category' "$CERBERUS_STATE_DIR/events.jsonl"
+  [ "$output" = "HARD/daemon_down" ]
+}
+
+@test "master.sh digest summarises the events log" {
+  mkdir -p "$CERBERUS_STATE_DIR"
+  printf '%s\n' \
+    "{\"ts\":\"$(date -Iseconds)\",\"severity\":\"HARD\",\"category\":\"c2_beacon\",\"pid\":\"1\",\"detail\":\"x\"}" \
+    "{\"ts\":\"$(date -Iseconds)\",\"severity\":\"SOFT\",\"category\":\"high_cpu\",\"pid\":\"2\",\"detail\":\"y\"}" \
+    > "$CERBERUS_STATE_DIR/events.jsonl"
+
+  run "$REPO_ROOT/master.sh" digest 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"c2_beacon"* ]]
+  [[ "$output" == *"high_cpu"* ]]
+}
+
+@test "master.sh reads the same state directory the daemon writes" {
+  run "$REPO_ROOT/master.sh" digest 1
+  [[ "$output" == *"$CERBERUS_STATE_DIR"* ]]
+}
+
+@test "install.sh --dry-run changes nothing on disk" {
+  local target="$TEST_TMP/target"
+  run "$REPO_ROOT/install.sh" --dry-run \
+    --code-dir "$target/opt" --conf-dir "$target/etc" \
+    --state-dir "$target/var" --unit-dir "$target/units"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"would:"* ]]
+  [ ! -d "$target" ]
+}
+
+@test "install.sh refuses to run without the source tree next to it" {
+  # Copied somewhere on its own, it must not half-install from nothing.
+  cp "$REPO_ROOT/install.sh" "$TEST_TMP/install.sh"
+  run bash "$TEST_TMP/install.sh" --dry-run
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"run this from the source tree"* ]]
+}

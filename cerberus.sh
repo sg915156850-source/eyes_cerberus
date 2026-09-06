@@ -9,7 +9,7 @@
 #
 # Design notes:
 #   * No `set -e`. A detector that exits non-zero (e.g. grep with no match) must
-#     never kill the loop. Risky calls are guarded via run() / `|| true`.
+#     never kill the loop. Risky calls are guarded via run_action() / `|| true`.
 #   * Detectors (lib/detect.sh) emit  SEVERITY|CATEGORY|PID|DETAIL  lines.
 #   * Responder (lib/respond.sh) is tiered: HARD may auto-act, SOFT alerts only.
 #   * All config lives in etc/cerberus.env (see etc/cerberus.env.example).

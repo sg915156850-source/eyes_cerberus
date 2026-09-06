@@ -16,7 +16,7 @@ SCRIPTS := cerberus.sh master.sh install.sh uninstall.sh \
            $(wildcard lib/*.sh) \
            ir/quick_response.sh ir/emergency_remediation.sh \
            $(wildcard ir/docker/*.sh) \
-           packaging/build-deb.sh
+           packaging/build-deb.sh tests/helper.bash
 
 VERSION := $(shell sed -n 's/^VERSION="\([0-9.]*\)"/\1/p' cerberus.sh | head -1)
 

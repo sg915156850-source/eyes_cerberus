@@ -120,7 +120,7 @@ Eyes Cerberus сейчас — рабочий инструмент для **од
 ### 2.3 CI
 **Готово когда:** GitHub Actions гоняет `shellcheck` + `bash -n` + `bats` на
 push и PR, и отдельной job'ой — установку и smoke-тест в контейнерах
-Debian 12, Ubuntu 24.04, Rocky 9.
+Debian 12, Ubuntu 24.04, AlmaLinux 9.
 
 ---
 

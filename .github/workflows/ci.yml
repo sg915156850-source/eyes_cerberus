@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-test:
+    name: lint + tests (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tooling
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends shellcheck bats jq
+      - name: Lint
+        run: make lint
+      - name: Tests
+        run: make test
+
+  distro-matrix:
+    # The daemon is bash + coreutils + procps + iproute2 + iptables, and the
+    # whole selling point is that it runs anywhere without a runtime. That
+    # claim is worth checking on more than one distribution.
+    name: tests on ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - debian:12
+          - ubuntu:24.04
+          - almalinux:9
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - name: Install tooling
+        run: |
+          set -eu
+          if command -v apt-get >/dev/null; then
+            apt-get update -qq
+            apt-get install -y --no-install-recommends \
+              bash coreutils procps iproute2 iptables bats jq git ca-certificates
+          else
+            dnf install -y --setopt=install_weak_deps=False epel-release
+            dnf install -y --setopt=install_weak_deps=False \
+              bash coreutils procps-ng iproute iptables bats jq git
+          fi
+      - uses: actions/checkout@v4
+      - name: Tests
+        run: bats tests
+
+  package:
+    name: build and install the .deb
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: make deb
+      - name: Install into a clean Debian and smoke test
+        run: |
+          set -eux
+          docker run --rm -v "$PWD:/src:ro" debian:12 bash -euxc '
+            apt-get update -qq >/dev/null
+            dpkg -i /src/dist/eyes-cerberus_*_all.deb || apt-get -yqq -f install >/dev/null
+
+            # installed where the README says, with the permissions it claims
+            test -x /opt/eyes-cerberus/cerberus.sh
+            test -d /etc/eyes-cerberus/signatures
+            test "$(stat -c %a /etc/eyes-cerberus/cerberus.env)" = 600
+            test "$(stat -c %a /var/lib/eyes-cerberus/quarantine)" = 700
+
+            # nothing unsupported shipped
+            test ! -e /opt/eyes-cerberus/ir/experimental
+
+            # an installed copy must resolve the FHS layout on its own
+            /opt/eyes-cerberus/cerberus.sh version
+            /opt/eyes-cerberus/cerberus.sh dryscan
+            test -d /var/lib/eyes-cerberus/baseline
+
+            # and the wrapper must read the same state
+            cerberus digest 1
+
+            # removal leaves evidence behind, purge does not
+            dpkg -r eyes-cerberus
+            test -d /var/lib/eyes-cerberus
+            dpkg -P eyes-cerberus
+            test ! -d /var/lib/eyes-cerberus
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eyes-cerberus-deb
+          path: dist/*.deb
+          if-no-files-found: error
+
+  install-script:
+    name: install.sh on a clean host
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install, verify, upgrade, uninstall
+        run: |
+          set -eux
+          sudo ./install.sh
+          test -x /opt/eyes-cerberus/cerberus.sh
+          sudo /opt/eyes-cerberus/cerberus.sh dryscan
+
+          # an operator edit to a signature file must survive an upgrade
+          echo "203.0.113.77" | sudo tee -a /etc/eyes-cerberus/signatures/c2_ips.txt
+          sudo ./install.sh
+          grep -q 203.0.113.77 /etc/eyes-cerberus/signatures/c2_ips.txt
+
+          sudo ./uninstall.sh
+          test ! -d /opt/eyes-cerberus
+          test -d /etc/eyes-cerberus          # config kept without --purge
+          sudo ./uninstall.sh --purge
+          test ! -d /etc/eyes-cerberus

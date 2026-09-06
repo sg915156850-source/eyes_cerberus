@@ -55,7 +55,7 @@ install.sh uninstall.sh  system install/removal (see Install)
 Makefile                 lint | test | check | install | deb
 packaging/build-deb.sh   .deb builder (needs only dpkg-deb)
 lib/
-  common.sh              config load, log(), notify(), run() (dry-run-aware), signature helpers
+  common.sh              config load, log(), notify(), run_action() (dry-run-aware), signature helpers
   detect.sh              all detectors -> SEVERITY|CATEGORY|PID|DETAIL lines
   respond.sh             tiered responder; idempotent C2 firewall; quarantine
   forensics.sh           non-destructive evidence capture (per-PID / per-file)
@@ -68,6 +68,8 @@ systemd/                 eyes-cerberus.service + eyes-cerberus-failure.service
 ir/                      MANUAL incident-response tools (not run by the daemon)
   quick_response.sh  emergency_remediation.sh  docker/
   experimental/          unsupported, excluded from packages -- see its README
+tests/                   bats suite + PATH shims (see "Verifying a change")
+.github/workflows/ci.yml lint, tests on 3 distros, package + install smoke tests
 state/                   runtime (git-ignored): events.jsonl, evidence/, quarantine/, baseline/
 ```
 
@@ -235,10 +237,28 @@ Not started by the daemon. Run by hand during a live incident.
 ## Verifying a change
 
 ```bash
-bash -n cerberus.sh lib/*.sh master.sh          # syntax
-./cerberus.sh dryscan                           # detectors run, zero actions
+make check                                      # lint + the whole test suite
+```
+
+`make lint` is `shellcheck -x -S warning` plus `bash -n` over every supported
+script; `make test` is the `bats` suite under `tests/`. The tests run as an
+ordinary user and never touch the host: each one gets its own
+`CERBERUS_CONF_DIR` and `CERBERUS_STATE_DIR` and a `PATH` of shims for `ps`,
+`ss`, `iptables`, `systemctl` and `crontab`. Where the code measures CPU from
+`/proc/<pid>/stat` — which no shim can fake — the tests spawn a real idle or
+spinning process and use its pid.
+
+CI runs the same two targets on Ubuntu, then the suite again in Debian 12,
+Ubuntu 24.04 and AlmaLinux 9 containers, then builds the `.deb`, installs it
+into a clean Debian and checks the installed layout, and finally exercises
+`install.sh` → upgrade → `uninstall.sh` on a real runner.
+
+End-to-end against the actual host, when you want to see containment happen:
+
+```bash
 printf '#!/bin/sh\n' > /tmp/let; chmod 755 /tmp/let
-./cerberus.sh scan                              # -> HARD/malware_path: /tmp/let chmod 000 + quarantined
+./cerberus.sh dryscan                           # -> reports it, touches nothing
+./cerberus.sh scan                              # -> HARD/malware_path: chmod 000 + quarantined
 ls state/quarantine state/evidence; cat state/events.jsonl
 sudo systemctl restart eyes-cerberus && ./master.sh status
 sudo kill -9 "$(systemctl show -p MainPID --value eyes-cerberus)"

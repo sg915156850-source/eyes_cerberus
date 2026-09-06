@@ -6,7 +6,7 @@
 #===============================================================================
 # Deliberately NO `set -e`: the sensor loop must survive a detector command that
 # exits non-zero (e.g. a grep with no match). We use `set -uo pipefail` and guard
-# risky calls explicitly with run() / `|| true`.
+# risky calls explicitly with run_action() / `|| true`.
 set -uo pipefail
 
 # --- Resolve the repo root from this file's location (symlink-safe) ----------
@@ -115,8 +115,11 @@ warn() { log WARN  "$*"; }
 err()  { log ERROR "$*"; }
 
 # --- Safe command wrapper -----------------------------------------------
-# run <cmd...>  : executes, or just logs when DRY_RUN=1. Never aborts the caller.
-run() {
+# run_action <cmd...> : executes, or just logs when DRY_RUN=1. Never aborts the
+# caller. Named run_action rather than run because `run` is a name the shell
+# world already spends -- bats defines its own, and a library that is sourced
+# into other people's scripts has no business claiming it.
+run_action() {
   if [ "$DRY_RUN" = "1" ]; then
     log DRY "$*"
     return 0
