@@ -132,6 +132,7 @@ case "${1:-status}" in
     ;;
   restore) shift; cmd_restore "$@" ;;
   digest)  cmd_digest "${2:-1}" ;;
+  report)  shift; exec "$ROOT/cerberus.sh" report "${1:-7}" "${2:-html}" ;;
   logs)    exec journalctl -u "$UNIT" -n "${2:-100}" --no-pager ;;
   help|*)
     cat <<EOF
@@ -146,6 +147,8 @@ Usage: $0 <command>
   quarantine     list what has been contained
   restore <id>   put a quarantined file back (prompts; --force to skip)
   digest [days]  summarise state/events.jsonl (default 1 day)
+  report [days] [html|json]
+                 full period report on stdout (default 7 days, html)
   logs [n]       journalctl for the unit (default 100 lines)
 EOF
     ;;

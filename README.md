@@ -49,7 +49,8 @@ tiers: high-confidence signatures are auto-contained, heuristics only alert.
 ### Repository layout
 
 ```
-cerberus.sh              daemon: run | scan | dryscan | baseline
+cerberus.sh              daemon: run | scan | dryscan | baseline | quarantine |
+                         restore | update-sigs | report | notify-failure
 master.sh                control wrapper over systemd + events log
 install.sh uninstall.sh  system install/removal (see Install)
 Makefile                 lint | test | check | install | deb
@@ -57,7 +58,9 @@ packaging/build-deb.sh   .deb builder (needs only dpkg-deb)
 lib/
   common.sh              config load, log(), notify(), run_action() (dry-run-aware), signature helpers
   detect.sh              all detectors -> SEVERITY|CATEGORY|PID|DETAIL lines
-  respond.sh             tiered responder; idempotent C2 firewall; quarantine
+  respond.sh             tiered responder; idempotent C2 firewall; quarantine + restore
+  sigupdate.sh           verified signature bundle fetch (update-sigs)
+  report.sh              period report as self-contained HTML or JSON
   forensics.sh           non-destructive evidence capture (per-PID / per-file)
   baseline.sh            persistence-surface snapshot + diff
 etc/
@@ -197,6 +200,8 @@ and `netfilter-persistent save` — that step is left to you.
                            # reviewing the current host state as known-good
 ./master.sh quarantine     # what has been contained, and when
 ./master.sh restore <id>   # put one of them back (prompts first)
+./master.sh report 30 html > report.html   # period report, self-contained page
+./master.sh report 30 json | jq .          # the same data, machine-readable
 ```
 
 ### Undoing a containment
@@ -225,6 +230,47 @@ finding), `evidence/`, `quarantine/`, `baseline/`, and `cerberus.log` — a plai
 log that also carries an hourly `heartbeat: N passes, M events total` line so you
 can tell the loop is alive even when nothing fires.
 
+### Reports
+
+`report` reads `events.jsonl` plus the current state of the host and writes to
+stdout. The HTML is one self-contained page — no fonts, scripts or styles
+fetched from anywhere, because a report that phones out to a CDN is not
+something you hand to someone else, and it would not render on the isolated
+box you are most likely reading it on. It respects the viewer's light/dark
+setting, and every attacker-controlled string in it is escaped.
+
+`json` is the same data for a script to consume: totals, counts by severity
+and category, and the most recent 200 events.
+
+### Keeping signatures current
+
+The signatures in this repository describe one host's incident. For a host
+that has never met that dropper, point the daemon at a bundle:
+
+```bash
+# in cerberus.env
+SIGNATURE_URL=https://example.com/cerberus/signatures.tar.gz
+SIGNATURE_SHA256=https://example.com/cerberus/signatures.sha256   # or the digest itself
+```
+
+```bash
+./cerberus.sh update-sigs --dry-run    # what would change
+./cerberus.sh update-sigs              # verify, install, keep the old set
+```
+
+A bundle is a flat tar.gz of `*.txt` signature files and nothing else. There is
+no unverified path: without a matching SHA-256 the bundle is not installed,
+because that file decides what a root process kills. The previous set is kept
+at `signatures.prev/` for a manual rollback, and anything you maintain by hand
+goes in `<name>.txt.local` — those entries are appended after every update
+rather than being overwritten.
+
+Run it from cron if you want it current:
+
+```cron
+17 4 * * *  /opt/eyes-cerberus/cerberus.sh update-sigs
+```
+
 ### Configuration (`etc/cerberus.env`)
 
 | Key | Default | Meaning |
@@ -242,6 +288,7 @@ can tell the loop is alive even when nothing fires.
 | `DETECT_REVSHELL` / `DETECT_FILELESS` / `DETECT_SETUID` / `DETECT_LOADER` | `1` | toggle the generic detectors |
 | `SETUID_DIRS` | `/tmp /var/tmp /dev/shm /home /root /opt /srv /usr/local` | where a new setuid file is worth reporting (not `/usr/bin`: that is package upgrades) |
 | `LOG_MAX_BYTES` / `LOG_KEEP` | `10485760` / `5` | rotate `events.jsonl` and `cerberus.log` past this size, keeping N generations |
+| `SIGNATURE_URL` / `SIGNATURE_SHA256` | empty | signature bundle for `update-sigs`, and the digest (inline or a URL) it must match |
 | `DETECT_EGRESS` | `0` | outbound-connection watch — noisy, opt-in |
 
 Signatures are plain text, one entry per line, `#` comments — edit and the daemon

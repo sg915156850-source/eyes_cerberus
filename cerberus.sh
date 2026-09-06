@@ -8,6 +8,8 @@
 #   cerberus.sh baseline Rebuild the persistence baseline from current state.
 #   cerberus.sh quarantine [list|restore <id>]
 #                       Review contained files, or undo a containment.
+#   cerberus.sh update-sigs [--dry-run]
+#                       Fetch a verified signature bundle.
 #
 # Design notes:
 #   * No `set -e`. A detector that exits non-zero (e.g. grep with no match) must
@@ -31,6 +33,10 @@ source "$_dir/lib/baseline.sh"
 source "$_dir/lib/detect.sh"
 # shellcheck source=lib/respond.sh
 source "$_dir/lib/respond.sh"
+# shellcheck source=lib/sigupdate.sh
+source "$_dir/lib/sigupdate.sh"
+# shellcheck source=lib/report.sh
+source "$_dir/lib/report.sh"
 
 VERSION="2.0.0"
 
@@ -119,6 +125,8 @@ case "${1:-run}" in
   baseline) baseline_build ;;
   notify-failure) cmd_notify_failure ;;
   quarantine) shift; cmd_quarantine "$@" ;;
+  update-sigs) shift; sig_update "$@" ;;
+  report) shift; report "${1:-7}" "${2:-html}" ;;
   version|-v|--version) echo "eyes-cerberus $VERSION" ;;
   *)
     cat <<EOF
@@ -131,6 +139,10 @@ Usage: $0 {run|scan|dryscan|baseline|version}
   notify-failure  emit a "daemon is down" alert (used by OnFailure=)
   quarantine [list|restore <id>]
             review what was contained, or put a file back
+  update-sigs [--dry-run]
+            fetch and verify a signature bundle (SIGNATURE_URL/SIGNATURE_SHA256)
+  report [days] [html|json]
+            period report over events.jsonl, on stdout
 EOF
     exit 1 ;;
 esac

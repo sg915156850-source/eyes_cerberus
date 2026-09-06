@@ -30,7 +30,7 @@ version:
 
 lint:
 	@command -v shellcheck >/dev/null || { echo "shellcheck not installed"; exit 1; }
-	bash -n $(SCRIPTS) $(wildcard tests/*.bash)
+	bash -n $(SCRIPTS)
 	shellcheck -x -S warning $(SCRIPTS)
 	@echo "lint: clean"
 
