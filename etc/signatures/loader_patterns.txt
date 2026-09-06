@@ -1,0 +1,20 @@
+# Download-and-run shapes, matched (case-insensitive, extended regex) against
+# the text of cron entries and systemd ExecStart lines. One alternative per
+# line. Blank lines and # comments ignored.
+#
+# A scheduled job that fetches code and executes it is how a compromise
+# survives a reboot and a cleanup. It is reported wherever it is found, not
+# only when it is new -- an entry that predates the baseline is not thereby
+# trustworthy. Each distinct line is reported once (see state/seen_loaders).
+#
+# curl/wget piped straight into a shell
+(curl|wget|fetch)[^|;&]*\|[[:space:]]*(sudo[[:space:]]+)?(ba|z|k|a|d)?sh
+# ... or into an interpreter
+(curl|wget)[^|;&]*\|[[:space:]]*(python[0-9.]*|perl|ruby|php|node)
+# base64 blob decoded into a shell
+base64[[:space:]]+(-d|--decode)[^|;&]*\|[[:space:]]*(ba|z|k|a)?sh
+echo[[:space:]]+[A-Za-z0-9+/=]{40,}[^|]*\|[[:space:]]*base64
+# fetch to a temp path, chmod, run
+(curl|wget)[^;&]*(-o|-O)[[:space:]]*/(tmp|var/tmp|dev/shm)/[^;&]*[;&]+[[:space:]]*(chmod|/?(tmp|var/tmp|dev/shm)/)
+# an interpreter running code straight off stdin
+(python[0-9.]*|perl|ruby)[[:space:]]+-[[:alpha:]]*[[:space:]]*-[[:space:]]*$

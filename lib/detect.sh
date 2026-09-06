@@ -188,6 +188,16 @@ detect_proc_exe() {
     case "$exe" in
       *" (deleted)")
         origin="${exe% (deleted)}"
+        # A process whose executable was never a file: the payload was written
+        # to an anonymous memory object and executed from there. Nothing to
+        # find on disk, which is the point of doing it that way. This used to
+        # fall through both path tests below and be dropped silently.
+        case "$origin" in
+          /memfd:*|memfd:*)
+            [ "${DETECT_FILELESS:-1}" = "1" ] && \
+              echo "SOFT|fileless|$pid|executing from anonymous memory: $origin ($(_pid_cmdline "$pid"))"
+            continue ;;
+        esac
         _is_standard_path "$origin" && continue        # benign: package upgrade
         _is_volatile_path "$origin" || continue        # only care about volatile origins
         echo "SOFT|deleted_exe|$pid|running from unlinked binary: $origin"
@@ -243,6 +253,37 @@ detect_c2() {
       echo "HARD|c2_socket|${spid:--}|established connection to C2 $ip :: $(echo "$line" | tr -s ' ')"
     done < <(ss -tanp state established 2>/dev/null | grep -F "$ip" || true)
   done
+}
+
+#---------------------------------------------------------------------------
+# _pid_cmdline <pid> : the process command line, NUL separators turned into
+# spaces. Read from /proc directly so it works for a process ps cannot show.
+#---------------------------------------------------------------------------
+_pid_cmdline() {
+  tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null | tr -s ' ' | sed 's/[[:space:]]*$//'
+}
+
+#---------------------------------------------------------------------------
+# SOFT: argv shaped like a reverse shell.
+#
+# Alert-only and it stays that way: `socat` in an administrator's hands and
+# `socat` in an attacker's look identical from the outside, and this daemon
+# does not kill on a guess. The patterns in revshell_patterns.txt are written
+# narrowly for the same reason.
+#---------------------------------------------------------------------------
+detect_revshell() {
+  [ "${DETECT_REVSHELL:-1}" = "1" ] || return 0
+  local pat
+  pat="$(read_sig revshell_patterns.txt | paste -sd'|' -)"
+  [ -n "$pat" ] || return 0
+
+  local pid args
+  while read -r pid args; do
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+    [ "$pid" = "$$" ] && continue          # never report the scan itself
+    echo "$args" | grep -qiE "$pat" || continue
+    echo "SOFT|revshell|$pid|reverse-shell shaped argv: $(echo "$args" | tr -s ' ')"
+  done < <(ps -eo pid=,args= 2>/dev/null)
 }
 
 #---------------------------------------------------------------------------
@@ -358,6 +399,71 @@ detect_persistence() {
 }
 
 #---------------------------------------------------------------------------
+# SOFT: a scheduled job or a service that downloads code and runs it.
+#
+# Unlike the persistence diff, this looks at content rather than at what is
+# new: an entry that predates the baseline is not trustworthy just because it
+# was there when the baseline was taken -- the baseline may have been recorded
+# on an already-compromised host. Each distinct line is reported once, tracked
+# in state/seen_loaders, so a permanent entry does not alert every pass.
+#---------------------------------------------------------------------------
+LOADER_SEEN_FILE="$STATE_DIR/seen_loaders"
+
+detect_loader() {
+  [ "${DETECT_LOADER:-1}" = "1" ] || return 0
+  # Shares the persistence cadence: this reads crontabs and unit files, which
+  # is the slow kind of probe.
+  local every="${PERSISTENCE_EVERY:-10}" n="${CERBERUS_PASS:-0}"
+  [ "$every" -le 1 ] || [ $(( n % every )) -eq 0 ] || return 0
+
+  local pat
+  pat="$(read_sig loader_patterns.txt | paste -sd'|' -)"
+  [ -n "$pat" ] || return 0
+
+  [ -f "$LOADER_SEEN_FILE" ] || : > "$LOADER_SEEN_FILE"
+
+  local where line key
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    where="${line%%$'\t'*}"
+    line="${line#*$'\t'}"
+    echo "$line" | grep -qiE "$pat" || continue
+
+    key="$(printf '%s|%s' "$where" "$line" | sha256sum | cut -d' ' -f1)"
+    grep -qxF "$key" "$LOADER_SEEN_FILE" && continue
+    printf '%s\n' "$key" >> "$LOADER_SEEN_FILE"
+
+    echo "SOFT|loader|-|downloads and executes code, in ${where}: $(echo "$line" | tr -s ' ')"
+  done < <(_loader_sources)
+}
+
+# _loader_sources : "location<TAB>line" for every place a scheduled command can
+# hide. Kept separate so the test can supply its own.
+_loader_sources() {
+  local f line
+  crontab -l 2>/dev/null | grep -vE '^[[:space:]]*(#|$)' \
+    | while IFS= read -r line; do printf 'root crontab\t%s\n' "$line"; done
+
+  for f in /etc/crontab /etc/cron.d/*; do
+    [ -f "$f" ] || continue
+    grep -vE '^[[:space:]]*(#|$)' "$f" 2>/dev/null \
+      | while IFS= read -r line; do printf '%s\t%s\n' "$f" "$line"; done
+  done
+
+  for f in /etc/cron.hourly/* /etc/cron.daily/* /etc/cron.weekly/* /etc/cron.monthly/*; do
+    [ -f "$f" ] || continue
+    grep -vE '^[[:space:]]*(#|$)' "$f" 2>/dev/null \
+      | while IFS= read -r line; do printf '%s\t%s\n' "$f" "$line"; done
+  done
+
+  for f in /etc/systemd/system/*.service /etc/systemd/system/*/*.service; do
+    [ -f "$f" ] || continue
+    grep -E '^[[:space:]]*(ExecStart|ExecStartPre|ExecStartPost|ExecReload)' "$f" 2>/dev/null \
+      | while IFS= read -r line; do printf '%s\t%s\n' "$f" "$line"; done
+  done
+}
+
+#---------------------------------------------------------------------------
 # SOFT: newly-appeared UPX-packed executable in a world-writable dir.
 #---------------------------------------------------------------------------
 detect_upx_new() {
@@ -381,9 +487,11 @@ run_all_detectors() {
   detect_malware_hashes
   detect_proc_exe
   detect_c2
+  detect_revshell
   detect_miner
   detect_high_cpu
   detect_new_listener
   detect_persistence
+  detect_loader
   detect_upx_new
 }

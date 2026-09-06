@@ -1,0 +1,24 @@
+# Reverse-shell shapes, matched (case-insensitive, extended regex) against
+# process argv. One alternative per line. Blank lines and # comments ignored.
+#
+# SOFT only, and it stays that way: an administrator debugging with socat and
+# an attacker using it look identical from the outside. These patterns are
+# written narrowly for the same reason -- a bare `bash -i` or a bare `nc` is
+# not here, only shapes with no innocent reading. The gaps are bounded rather
+# than `.*` so a long command line cannot match by accident across unrelated
+# parts of itself.
+#
+# bash/sh network redirect: exec 5<>/dev/tcp/1.2.3.4/4444
+/dev/(tcp|udp)/[0-9]
+# nc / ncat with a command attached
+(^|/)(nc|ncat|netcat)[[:space:]][^|;]{0,60}-[a-z]*e[[:space:]]+/(bin|usr)
+# socat handing a shell to the far end
+socat[^|;]{0,80}exec:[[:space:]]*/?(bin/)?(ba|z|k|a)?sh
+socat[^|;]{0,80}system:
+# the classic interpreter one-liners
+python[0-9.]*[[:space:]]+-c.{0,200}socket.{0,200}(connect|dup2)
+perl[[:space:]]+-e.{0,200}socket.{0,200}(connect|inet_aton)
+ruby[[:space:]]+-(e|rsocket).{0,200}tcpsocket
+php[[:space:]]+-r.{0,200}fsockopen
+# an interactive shell with both descriptors redirected somewhere
+(ba|z|k|a)?sh[[:space:]]+-i[^|;]{0,40}(>&|0<&|<&)[[:space:]]*[0-9/]

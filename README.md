@@ -63,8 +63,9 @@ lib/
 etc/
   cerberus.env.example   copy to cerberus.env and edit (cerberus.env is git-ignored)
   whitelist.txt          process names exempt from CPU/miner heuristics
-  signatures/            malware_md5, malware_sha256, c2_ips, c2_ports,
-                         miner_patterns, malware_paths
+  signatures/            malware_md5, malware_sha256, malware_paths, c2_ips,
+                         c2_ports, miner_patterns, revshell_patterns,
+                         loader_patterns
 systemd/                 eyes-cerberus.service + eyes-cerberus-failure.service
 ir/                      MANUAL incident-response tools (not run by the daemon)
   quick_response.sh  emergency_remediation.sh  docker/
@@ -94,10 +95,13 @@ state/                   runtime (git-ignored): events.jsonl, evidence/, quarant
 | Category | Trigger |
 |---|---|
 | `high_cpu` | non-whitelisted process over `CPU_THRESHOLD` on `CPU_SUSTAIN_SAMPLES` consecutive passes (instantaneous CPU, not `ps` average) |
+| `revshell` | argv shaped like a reverse shell — `/dev/tcp` redirect, `nc -e`, `socat ... exec:`, the python/perl/php one-liners (`signatures/revshell_patterns.txt`). Argv heuristics: an administrator debugging with `socat` looks the same from outside, which is why this never escalates to HARD |
+| `fileless` | a process executing from anonymous memory (`/memfd:…`) — a payload that never touched the disk |
+| `loader` | a cron entry or unit `ExecStart` that downloads code and runs it (`curl\|sh`, `base64 -d\|sh`, fetch-chmod-run) — reported once per distinct line, not only when new |
 | `miner` | miner-like argv but **not** CPU-hot |
 | `exe_in_volatile` / `deleted_exe` | process running from `/tmp`,`/dev/shm`,… or from an unlinked binary whose origin was a volatile dir (package upgrades under `/usr` are ignored) |
 | `new_listener` | a listening TCP port absent from `state/baseline/listeners` |
-| `persistence` | additions vs `state/baseline/` in: root crontab, `/etc/cron.*`, systemd unit files, running services, `/root/.ssh/authorized_keys`, root shell rc files, `/etc/ld.so.preload` (checked once every `PERSISTENCE_EVERY` passes; removals are ignored) |
+| `persistence` | additions vs `state/baseline/` in: root crontab, `/etc/cron.*`, systemd unit files, running services, `/root/.ssh/authorized_keys`, root shell rc files, `/etc/ld.so.preload`, accounts in `/etc/passwd`, `sudoers` + `sudoers.d`, effective `sshd_config`, `/etc/pam.d`, and setuid/setgid files under `SETUID_DIRS` (checked once every `PERSISTENCE_EVERY` passes; removals are ignored) |
 | `upx_new` | a newly-appeared UPX-packed executable in a world-writable dir |
 | `egress` | new outbound connection to a non-whitelisted external IP (**off by default**, noisy) |
 
@@ -235,6 +239,8 @@ can tell the loop is alive even when nothing fires.
 | `NOTIFY_METHOD` | `log` | `log` \| `telegram` \| `webhook` \| `email` (+ `TG_TOKEN`/`TG_CHAT`, `WEBHOOK_URL`, `EMAIL_TO`) |
 | `NOTIFY_MIN_SEVERITY` | `SOFT` | `HARD` to mute SOFT notifications (still recorded in `events.jsonl`) |
 | `DETECT_HIGH_CPU` / `DETECT_NEW_LISTENER` / `DETECT_PERSISTENCE` / `DETECT_UPX_NEW` | `1` | toggle individual SOFT detectors |
+| `DETECT_REVSHELL` / `DETECT_FILELESS` / `DETECT_SETUID` / `DETECT_LOADER` | `1` | toggle the generic detectors |
+| `SETUID_DIRS` | `/tmp /var/tmp /dev/shm /home /root /opt /srv /usr/local` | where a new setuid file is worth reporting (not `/usr/bin`: that is package upgrades) |
 | `LOG_MAX_BYTES` / `LOG_KEEP` | `10485760` / `5` | rotate `events.jsonl` and `cerberus.log` past this size, keeping N generations |
 | `DETECT_EGRESS` | `0` | outbound-connection watch — noisy, opt-in |
 

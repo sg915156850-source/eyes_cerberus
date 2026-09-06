@@ -115,3 +115,78 @@ setup() {
   run cat "$TEST_TMP/snap/ld_preload"
   [ -z "$output" ]
 }
+
+# --- expanded persistence surface ------------------------------------------
+
+@test "a new account is reported" {
+  PASSWD_FILE="$TEST_TMP/passwd"
+  printf 'root:x:0:0:root:/root:/bin/bash\ndaemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\n' \
+    > "$PASSWD_FILE"
+  baseline_build
+  printf 'backup2:x:0:0:backup:/root:/bin/bash\n' >> "$PASSWD_FILE"
+
+  run baseline_diff
+  [[ "$output" == *"new in accounts: backup2:0:0"* ]]
+}
+
+@test "a new sudoers drop-in is reported with the file it came from" {
+  SUDOERS_FILE="$TEST_TMP/sudoers"
+  SUDOERS_DIR="$TEST_TMP/sudoers.d"
+  mkdir -p "$SUDOERS_DIR"
+  printf 'root ALL=(ALL:ALL) ALL\n' > "$SUDOERS_FILE"
+  baseline_build
+  printf 'www-data ALL=(ALL) NOPASSWD: ALL\n' > "$SUDOERS_DIR/99-www"
+
+  run baseline_diff
+  [[ "$output" == *"new in sudoers:"* ]]
+  [[ "$output" == *"99-www"* ]]
+  [[ "$output" == *"NOPASSWD"* ]]
+}
+
+@test "an sshd directive change is reported by name, not as a hash" {
+  SSHD_CONFIG="$TEST_TMP/sshd_config"
+  printf 'Port 22\nPermitRootLogin prohibit-password\n' > "$SSHD_CONFIG"
+  baseline_build
+  printf 'Port 22\nPermitRootLogin yes\n' > "$SSHD_CONFIG"
+
+  run baseline_diff
+  [[ "$output" == *"new in sshd_config: PermitRootLogin yes"* ]]
+}
+
+@test "a modified PAM module is reported" {
+  PAM_DIR="$TEST_TMP/pam.d"
+  mkdir -p "$PAM_DIR"
+  printf 'auth required pam_unix.so\n' > "$PAM_DIR/sshd"
+  baseline_build
+  printf 'auth required pam_unix.so\nauth optional /lib/evil.so\n' > "$PAM_DIR/sshd"
+
+  run baseline_diff
+  [[ "$output" == *"new in pam:"* ]]
+  [[ "$output" == *"$PAM_DIR/sshd"* ]]
+}
+
+@test "a new setuid binary is reported" {
+  SETUID_DIRS="$TEST_TMP/scan"
+  mkdir -p "$SETUID_DIRS"
+  printf '#!/bin/sh\n' > "$SETUID_DIRS/ordinary"
+  chmod 755 "$SETUID_DIRS/ordinary"
+  baseline_build
+
+  cp /bin/sh "$SETUID_DIRS/rootshell"
+  chmod 4755 "$SETUID_DIRS/rootshell"
+
+  run baseline_diff
+  [[ "$output" == *"new in setuid:"* ]]
+  [[ "$output" == *"rootshell"* ]]
+}
+
+@test "setuid scanning is skipped when DETECT_SETUID=0" {
+  SETUID_DIRS="$TEST_TMP/scan"
+  mkdir -p "$SETUID_DIRS"
+  DETECT_SETUID=0 baseline_build
+  cp /bin/sh "$SETUID_DIRS/rootshell"
+  chmod 4755 "$SETUID_DIRS/rootshell"
+
+  DETECT_SETUID=0 run baseline_diff
+  [[ "$output" != *"setuid"* ]]
+}
