@@ -115,7 +115,7 @@ detect_proc_exe() {
   local -a md5s
   mapfile -t md5s < <(read_sig malware_md5.txt)
   local pid exe origin h m
-  for pid in $(ls /proc 2>/dev/null | grep -E '^[0-9]+$'); do
+  while read -r pid; do
     exe="$(readlink "/proc/$pid/exe" 2>/dev/null || true)"
     [ -n "$exe" ] || continue
     case "$exe" in
@@ -134,7 +134,7 @@ detect_proc_exe() {
       done
     fi
     echo "SOFT|exe_in_volatile|$pid|executable under volatile dir: $exe"
-  done
+  done < <(iter_pids)
 }
 
 #---------------------------------------------------------------------------

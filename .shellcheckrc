@@ -1,0 +1,12 @@
+# Eyes Cerberus shellcheck configuration.
+# `make lint` runs: shellcheck -x -S warning <every tracked shell script>
+# Nothing global is disabled here beyond the two below; everything else is
+# suppressed at the line that needs it, with a reason.
+
+# SC1091: `source "$_dir/lib/common.sh"` -- resolved via -x, but the runtime
+# path is built from BASH_SOURCE and shellcheck cannot always follow it.
+disable=SC1091
+
+# SC2015: `a && b || c` is used deliberately in the status/report output paths,
+# where c running after a true-but-failing b is the intended fallback message.
+disable=SC2015

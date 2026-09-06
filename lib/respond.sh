@@ -62,12 +62,12 @@ _quarantine_file() {
 # (it would match log tails, editors, this very scan) and could kill bystanders.
 _pids_executing() {
   local target="$1" pid exe
-  for pid in $(ls /proc 2>/dev/null | grep -E '^[0-9]+$'); do
+  while read -r pid; do
     exe="$(readlink "/proc/$pid/exe" 2>/dev/null || true)"
     [ -n "$exe" ] || continue
     exe="${exe% (deleted)}"
     [ "$exe" = "$target" ] && echo "$pid"
-  done
+  done < <(iter_pids)
 }
 
 # _kill_pid <pid>
@@ -75,8 +75,7 @@ _kill_pid() {
   local pid="$1"
   kill -0 "$pid" 2>/dev/null || { info "pid $pid already gone"; return 0; }
   run kill -TERM "$pid"
-  local i
-  for i in 1 2 3 4 5; do
+  for _ in 1 2 3 4 5; do
     kill -0 "$pid" 2>/dev/null || { info "pid $pid stopped after SIGTERM"; return 0; }
     sleep 1
   done

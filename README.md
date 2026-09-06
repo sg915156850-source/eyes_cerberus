@@ -63,7 +63,8 @@ etc/
   signatures/            malware_md5, c2_ips, c2_ports, miner_patterns, malware_paths
 systemd/eyes-cerberus.service
 ir/                      MANUAL incident-response tools (not run by the daemon)
-  quick_response.sh  emergency_remediation.sh  honeypot.sh  docker/
+  quick_response.sh  emergency_remediation.sh  docker/
+  experimental/          unsupported, excluded from packages -- see its README
 state/                   runtime (git-ignored): events.jsonl, evidence/, quarantine/, baseline/
 ```
 
@@ -174,8 +175,9 @@ Not started by the daemon. Run by hand during a live incident.
 
 - `ir/quick_response.sh {status|stop|block|evidence|quarantine|scan}` — quick actions.
 - `ir/emergency_remediation.sh` — guided full response (prompts before acting).
-- `ir/honeypot.sh` — decoy service + connection logging (optional, noisy).
 - `ir/docker/` — Docker-based sample isolation (`CONTAINMENT_STRATEGY.md`, `containment.sh`).
+- `ir/experimental/` — not supported, not packaged, not run by anything. Read
+  `ir/experimental/README.md` before touching it.
 
 ---
 

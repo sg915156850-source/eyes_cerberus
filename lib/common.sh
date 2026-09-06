@@ -21,7 +21,6 @@ export CERBERUS_ROOT
 
 # --- Canonical layout -------------------------------------------------------
 ETC_DIR="$CERBERUS_ROOT/etc"
-LIB_DIR="$CERBERUS_ROOT/lib"
 SIG_DIR="$ETC_DIR/signatures"
 STATE_DIR="$CERBERUS_ROOT/state"
 EVIDENCE_DIR="$STATE_DIR/evidence"
@@ -35,6 +34,10 @@ CONFIG_FILE="$ETC_DIR/cerberus.env"
 mkdir -p "$STATE_DIR" "$EVIDENCE_DIR" "$QUARANTINE_DIR" "$BASELINE_DIR"
 
 # --- Config defaults (overridden by etc/cerberus.env) ----------------------
+# These are read by the sourcing modules, not by this file; shellcheck cannot
+# see that across `source`, hence the SC2034 suppression on the block.
+# shellcheck disable=SC2034
+{
 SENSOR_INTERVAL=30
 CPU_THRESHOLD=85
 CPU_SUSTAIN_SAMPLES=4
@@ -53,6 +56,7 @@ TG_TOKEN=""
 TG_CHAT=""
 WEBHOOK_URL=""
 EMAIL_TO=""
+}
 
 if [ -f "$CONFIG_FILE" ]; then
   # shellcheck disable=SC1090
@@ -83,6 +87,18 @@ run() {
 
 require_tool() {
   command -v "$1" >/dev/null 2>&1 || { warn "missing tool: $1"; return 1; }
+}
+
+# iter_pids : every numeric PID currently in /proc, one per line.
+# A glob rather than `ls /proc | grep` so a hostile filename can never be
+# word-split into the caller's loop.
+iter_pids() {
+  local d pid
+  for d in /proc/[0-9]*; do
+    pid="${d#/proc/}"
+    [ -d "$d" ] || continue
+    printf '%s\n' "$pid"
+  done
 }
 
 # --- Signature file helpers -------------------------------------------

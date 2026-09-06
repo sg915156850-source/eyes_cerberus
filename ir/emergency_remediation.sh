@@ -17,7 +17,7 @@ EV="$ROOT/state/evidence/remediation_$TS"
 Q="$ROOT/state/quarantine/remediation_$TS"
 APP_DIR="${1:-}"
 
-RED=$'\033[0;31m'; GRN=$'\033[0;32m'; YEL=$'\033[1;33m'; NC=$'\033[0m'
+GRN=$'\033[0;32m'; YEL=$'\033[1;33m'; NC=$'\033[0m'
 log(){ echo "${GRN}[+]${NC} $*" | tee -a "$ROOT/state/remediation.log"; }
 warn(){ echo "${YEL}[!]${NC} $*" | tee -a "$ROOT/state/remediation.log"; }
 
@@ -25,8 +25,9 @@ sig(){ sed -e 's/#.*//' -e '/^[[:space:]]*$/d' -e 's/^[[:space:]]*//;s/[[:space:
 
 # PIDs whose executable IS $1 (exact /proc/<pid>/exe match, not an argv match).
 pids_executing(){
-  local t="$1" pid exe
-  for pid in $(ls /proc 2>/dev/null | grep -E '^[0-9]+$'); do
+  local t="$1" d pid exe
+  for d in /proc/[0-9]*; do
+    pid="${d#/proc/}"
     exe="$(readlink "/proc/$pid/exe" 2>/dev/null || true)"; exe="${exe% (deleted)}"
     [ "$exe" = "$t" ] && echo "$pid"
   done

@@ -73,7 +73,8 @@ snapshot_pid() {
 snapshot_file() {
   local f="$1" tag="${2:-file}"
   local ts; ts="$(date +%Y%m%d_%H%M%S)"
-  local out="$EVIDENCE_DIR/${ts}_file_$(basename "$f")_${tag}.txt"
+  local base; base="$(basename "$f")"
+  local out="$EVIDENCE_DIR/${ts}_file_${base}_${tag}.txt"
   {
     echo "=== Cerberus evidence: FILE=$f TAG=$tag ==="
     echo "collected: $(date -Iseconds)"
