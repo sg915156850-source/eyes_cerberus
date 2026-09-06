@@ -255,3 +255,18 @@ teardown() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"quarantined copy does not"* ]]
 }
+
+@test "evidence still captures strings without binutils installed" {
+  # strings(1) is binutils; a minimal server does not have it, and the evidence
+  # file is the reason the original is preserved rather than deleted.
+  printf '#!/bin/sh\nexit 127\n' > "$SHIM_DIR/strings"; chmod +x "$SHIM_DIR/strings"
+  rm -f "$SHIM_DIR/strings"                       # simulate: not installed at all
+  local payload="$TEST_TMP/let"
+  printf 'ELF junk RECOGNISABLE_MARKER more junk\n' > "$payload"; chmod 755 "$payload"
+
+  PATH="$SHIM_DIR:$(echo "$PATH" | tr ':' '\n' | grep -v '^/usr/bin$' | paste -sd: -)" \
+    AUTO_RESPONSE=0 handle_finding "HARD|malware_path|-|$payload perms=755"
+
+  run bash -c "cat '$EVIDENCE_DIR'/*file*"
+  [[ "$output" == *"RECOGNISABLE_MARKER"* ]]
+}

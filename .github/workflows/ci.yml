@@ -46,13 +46,14 @@ jobs:
           if command -v apt-get >/dev/null; then
             apt-get update -qq
             apt-get install -y --no-install-recommends \
-              bash coreutils procps iproute2 iptables bats jq git ca-certificates
+              bash coreutils procps iproute2 iptables bats jq git ca-certificates \
+              python3
           else
             dnf install -y --setopt=install_weak_deps=False epel-release
             # no bash/coreutils here: they are in the base image, and asking
             # for coreutils conflicts with the coreutils-single it ships
             dnf install -y --setopt=install_weak_deps=False \
-              procps-ng iproute iptables bats jq git
+              procps-ng iproute iptables bats jq git python3
           fi
       - uses: actions/checkout@v4
       - name: Tests
