@@ -57,7 +57,6 @@ Section: admin
 Priority: optional
 Architecture: all
 Depends: bash (>= 4.4), coreutils, procps, iproute2, iptables
-Recommends: binutils
 Installed-Size: $INSTALLED_SIZE
 Maintainer: Eyes Cerberus <sg915156850@gmail.com>
 Homepage: https://github.com/sg915156850-source/eyes_cerberus

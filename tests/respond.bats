@@ -215,6 +215,19 @@ teardown() {
   [ "$output" = "1" ]
 }
 
+@test "restore leaves the quarantined copy locked down afterwards" {
+  local payload="$TEST_TMP/let"
+  printf 'content\n' > "$payload"; chmod 700 "$payload"
+  AUTO_RESPONSE=1 DRY_RUN=0 handle_finding "HARD|malware_path|-|$payload perms=700"
+  local id; id="$(quarantine_list | cut -f1)"
+
+  quarantine_restore "$id"
+
+  # restore has to read a copy stored chmod 000; it must not leave it readable
+  run stat -c '%a' "$QUARANTINE_DIR/$id"
+  [ "$output" = "0" ]
+}
+
 @test "restore refuses an unknown id" {
   run quarantine_restore "20200101_000000_nope_deadbeef"
   [ "$status" -ne 0 ]

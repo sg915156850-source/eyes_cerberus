@@ -6,7 +6,16 @@
 #===============================================================================
 set -uo pipefail
 
-ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+# Resolve through symlinks: the installer puts /usr/local/sbin/cerberus ->
+# .../master.sh, and BASH_SOURCE is then the symlink, so a naive dirname made
+# ROOT=/usr/local/sbin and every source and exec below missed.
+_self="${BASH_SOURCE[0]}"
+while [ -h "$_self" ]; do
+  _self_dir="$(cd -P "$(dirname "$_self")" >/dev/null 2>&1 && pwd)"
+  _self="$(readlink "$_self")"
+  [[ "$_self" != /* ]] && _self="$_self_dir/$_self"
+done
+ROOT="$(cd -P "$(dirname "$_self")" >/dev/null 2>&1 && pwd)"
 UNIT="eyes-cerberus.service"
 
 # Sourced for the layout resolution (repo vs installed) and read_sig(), so the

@@ -152,7 +152,22 @@ quarantine_restore() {
 
   info "restoring $id -> $orig (perms ${perms:-600})"
   run_action mkdir -p "$(dirname "$orig")"
-  run_action cp -p "$copy" "$orig" || { err "restore failed"; return 1; }
+
+  # The quarantined copy is stored chmod 000 so nothing can execute it by
+  # accident. Root reads it regardless; anyone else -- an operator reviewing a
+  # false positive on their own machine -- cannot, so make it readable for the
+  # copy and put it back afterwards.
+  run_action chmod u+r "$copy"
+  # Same story at the destination: the original was neutralised in place with
+  # chmod 000, and its owner cannot open a 000 file for writing. Root never
+  # noticed this; anyone else could not restore at all.
+  [ -e "$orig" ] && run_action chmod u+w "$orig"
+  if ! run_action cp -p "$copy" "$orig"; then
+    run_action chmod 000 "$copy"
+    err "restore failed"
+    return 1
+  fi
+  run_action chmod 000 "$copy"
   run_action chmod "${perms:-600}" "$orig"
   emit_event SOFT quarantine_restore "-" "restored $id to $orig with perms ${perms:-600}"
   return 0

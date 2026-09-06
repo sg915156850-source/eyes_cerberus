@@ -206,6 +206,21 @@ teardown() {
 
 # --- upx -------------------------------------------------------------------
 
+@test "upx_new: detection does not depend on binutils being installed" {
+  # strings(1) is binutils, which minimal servers do not have. When it was
+  # missing this detector quietly found nothing at all.
+  local f="$TEST_TMP/packed"
+  printf 'ELF junk UPX! more junk\n' > "$f"
+  chmod 700 "$f"
+  _SUSPECT_DIRS=("$TEST_TMP")
+
+  printf '#!/bin/sh\nexit 127\n' > "$SHIM_DIR/strings"   # as if binutils were absent
+  chmod +x "$SHIM_DIR/strings"
+
+  run detect_upx_new
+  [[ "$output" == *"SOFT|upx_new|-|UPX-packed executable: $f"* ]]
+}
+
 @test "upx_new: a UPX-packed file in a volatile directory is SOFT" {
   local f="$TEST_TMP/packed"
   printf 'ELF junk UPX! more junk\n' > "$f"

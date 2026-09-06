@@ -163,3 +163,24 @@ EOF
   [[ "$output" == *"continuing anyway"* ]]
   [[ "$output" == *"HARD|malware_path"* ]]
 }
+
+@test "master.sh works when reached through a symlink" {
+  # install.sh puts /usr/local/sbin/cerberus -> .../master.sh, so BASH_SOURCE
+  # is the symlink and a naive dirname pointed every source and exec at
+  # /usr/local/sbin.
+  mkdir -p "$TEST_TMP/sbin"
+  ln -sfn "$REPO_ROOT/master.sh" "$TEST_TMP/sbin/cerberus"
+  run "$TEST_TMP/sbin/cerberus" digest 1
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"No such file or directory"* ]]
+  [[ "$output" != *"unbound variable"* ]]
+}
+
+@test "master.sh works through a relative symlink too" {
+  mkdir -p "$TEST_TMP/sbin"
+  ln -sfn "../../$(basename "$REPO_ROOT")/master.sh" "$TEST_TMP/sbin/rel" 2>/dev/null || true
+  ln -sfn "$REPO_ROOT/master.sh" "$TEST_TMP/sbin/a"
+  ln -sfn "$TEST_TMP/sbin/a" "$TEST_TMP/sbin/b"     # a chain of them
+  run "$TEST_TMP/sbin/b" digest 1
+  [ "$status" -eq 0 ]
+}

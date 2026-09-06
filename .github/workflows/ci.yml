@@ -49,8 +49,10 @@ jobs:
               bash coreutils procps iproute2 iptables bats jq git ca-certificates
           else
             dnf install -y --setopt=install_weak_deps=False epel-release
+            # no bash/coreutils here: they are in the base image, and asking
+            # for coreutils conflicts with the coreutils-single it ships
             dnf install -y --setopt=install_weak_deps=False \
-              bash coreutils procps-ng iproute iptables bats jq git
+              procps-ng iproute iptables bats jq git
           fi
       - uses: actions/checkout@v4
       - name: Tests
@@ -114,7 +116,8 @@ jobs:
           # an operator edit to a signature file must survive an upgrade
           echo "203.0.113.77" | sudo tee -a /etc/eyes-cerberus/signatures/c2_ips.txt
           sudo ./install.sh
-          grep -q 203.0.113.77 /etc/eyes-cerberus/signatures/c2_ips.txt
+          # the signatures are root-only by design, so read them as root
+          sudo grep -q 203.0.113.77 /etc/eyes-cerberus/signatures/c2_ips.txt
 
           sudo ./uninstall.sh
           test ! -d /opt/eyes-cerberus

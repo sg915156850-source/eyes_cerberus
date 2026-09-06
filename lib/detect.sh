@@ -491,7 +491,10 @@ detect_upx_new() {
   [ -f "$UPX_MARKER" ] && find_args+=(-newer "$UPX_MARKER")
   local f
   while IFS= read -r -d '' f; do
-    if strings "$f" 2>/dev/null | grep -qm1 'UPX!'; then
+    # grep -a rather than strings(1): strings comes from binutils, which is not
+    # installed on a minimal server, and this detector silently found nothing
+    # there -- the worst failure mode a detector has.
+    if LC_ALL=C grep -qa 'UPX!' "$f" 2>/dev/null; then
       echo "SOFT|upx_new|-|UPX-packed executable: $f ($(md5sum "$f" 2>/dev/null | cut -d' ' -f1))"
     fi
   done < <(find "${_SUSPECT_DIRS[@]}" "${find_args[@]}" -print0 2>/dev/null)
