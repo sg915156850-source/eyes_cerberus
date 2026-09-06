@@ -376,12 +376,10 @@ teardown() {
 @test "fileless: a process running from anonymous memory is reported" {
   # A real memfd, not a fixture: the helper execs a script that only ever
   # existed in memory, so /proc/<pid>/exe genuinely reads "/memfd:... (deleted)".
-  python3 "$REPO_ROOT/tests/memfd_exec.py" "$TEST_TMP/memfd.pid" </dev/null >/dev/null 2>&1 &
-  SPAWNED=$!
-  disown "$SPAWNED" 2>/dev/null || true
-
-  local i=0
-  while [ ! -s "$TEST_TMP/memfd.pid" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$(( i + 1 )); done
+  # The helper exits as soon as it has published the pid; the memfd process it
+  # left behind is reparented and killed by this test.
+  python3 "$REPO_ROOT/tests/memfd_exec.py" "$TEST_TMP/memfd.pid" </dev/null >/dev/null 2>&1 || \
+    skip "no memfd process available here"
   local child; child="$(cat "$TEST_TMP/memfd.pid" 2>/dev/null || true)"
   [ -n "$child" ] || skip "kernel or python without memfd_create"
 

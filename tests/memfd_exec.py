@@ -11,8 +11,9 @@ writer is not guaranteed to have been flushed before the fork, and an empty
 memfd makes execv fail with ENOEXEC -- which showed up as a detector test
 failing on one distribution and passing on another.
 
-argv[1] is a file to write the child's pid to. Nothing is written if the child
-did not survive, so the caller can skip rather than fail.
+argv[1] is a file to write the child's pid to; this process then exits and the
+child is reparented. Nothing is written if the child did not survive, so the
+caller can skip rather than fail -- and the caller kills the pid it was given.
 """
 import os
 import sys
@@ -66,6 +67,8 @@ for _ in range(20):
 else:
     sys.exit("could not get a live process running from a memfd")
 
+# Write the pid and get out of the way. The child does not need this process:
+# it is a plain sleep(1) and survives reparenting, and the test kills it by pid
+# when it is done. Hanging around for 30 seconds only made the suite wait.
 with open(sys.argv[1], "w") as fh:
     fh.write(str(pid))
-time.sleep(30)

@@ -20,8 +20,10 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends shellcheck bats jq
       - name: Lint
+        timeout-minutes: 5
         run: make lint
       - name: Tests
+        timeout-minutes: 10
         run: make test
 
   distro-matrix:
@@ -57,6 +59,7 @@ jobs:
           fi
       - uses: actions/checkout@v4
       - name: Tests
+        timeout-minutes: 10
         run: bats tests
 
   package:
