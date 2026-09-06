@@ -34,21 +34,37 @@ os.fchmod(fd, 0o700)
 pid = os.fork()
 if pid == 0:
     try:
-        os.execv(f"/proc/self/fd/{fd}", ["cerberus-memfd-test", "300"])
+        # argv[0] stays "sleep": some distributions ship coreutils-single,
+        # where /bin/sleep is a symlink into one multicall binary that
+        # dispatches on argv[0] and exits immediately under any other name.
+        os.execv(f"/proc/self/fd/{fd}", ["sleep", "300"])
     finally:
         os._exit(127)
 
-# Only claim the child if it actually got off the ground.
-time.sleep(0.3)
-alive = False
-try:
-    dead, status = os.waitpid(pid, os.WNOHANG)
-    alive = dead == 0
-except ChildProcessError:
-    alive = False
 
-if not alive:
-    sys.exit("child did not survive execv from the memfd")
+def child_ok():
+    """The child is alive AND its exe really reads as an anonymous memfd."""
+    try:
+        reaped, _ = os.waitpid(pid, os.WNOHANG)
+    except ChildProcessError:
+        return False
+    if reaped != 0:
+        return False
+    try:
+        return "memfd:" in os.readlink(f"/proc/{pid}/exe")
+    except OSError:
+        return False
+
+
+# Assert the precondition here rather than leaving the test to infer it from a
+# missing finding: if this environment cannot produce a memfd process, the test
+# should skip, not fail.
+for _ in range(20):
+    if child_ok():
+        break
+    time.sleep(0.1)
+else:
+    sys.exit("could not get a live process running from a memfd")
 
 with open(sys.argv[1], "w") as fh:
     fh.write(str(pid))
