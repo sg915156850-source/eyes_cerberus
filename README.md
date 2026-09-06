@@ -299,10 +299,13 @@ picks them up on the next pass (no restart needed).
 
 `cerberus.env` is sourced as bash by a root process and the signature files
 decide what gets killed, so write access to either is root access. The daemon
-checks this at startup and refuses to run if anything under the config
-directory is writable by group or other, or is not owned by root. `dryscan`
-warns instead of refusing — it takes no action, and it is the command you want
-while fixing exactly that.
+refuses to start if anything under the config directory is writable by group
+or other, or is not owned by root, and re-checks on the persistence cadence
+while it runs. If the permissions are loosened mid-run it does not exit —
+that would leave the host unwatched — it emits a HARD `config_untrusted` event
+and drops to alert-only for the rest of the run. `dryscan` warns instead of
+refusing: it takes no action, and it is the command you want while fixing
+exactly this.
 
 ---
 
@@ -324,11 +327,12 @@ Not started by the daemon. Run by hand during a live incident.
 make check                                      # lint + the whole test suite
 ```
 
-`dryscan` means it: no kill, no chmod, no firewall change, and no state
-either — it will not seed the persistence baseline, the listener baseline, the
-CPU sustain counter or the scan markers. Seeding a baseline is a decision
-("this host is known-good"), and making it silently on a host that may already
-be compromised is the wrong default.
+`dryscan` means it: no kill, no chmod, no firewall change, and nothing that
+changes what a later pass does — it will not seed the persistence baseline,
+the listener baseline, the CPU sustain counter or the scan markers. (It does
+append to its own run log, `state/cerberus.log`.) Seeding a baseline is a
+decision — "this host is known-good" — and making it silently on a host that
+may already be compromised is the wrong default.
 
 `make lint` is `shellcheck -x -S warning` plus `bash -n` over every supported
 script; `make test` is the `bats` suite under `tests/`. The tests run as an

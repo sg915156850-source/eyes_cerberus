@@ -139,3 +139,27 @@ EOF
   [ "$status" -eq 0 ]
   [ -f "$CERBERUS_STATE_DIR/.hashscan_marker" ]
 }
+
+@test "the daemon refuses to start on a config anyone can rewrite" {
+  chmod 666 "$CERBERUS_CONF_DIR/cerberus.env"
+  run timeout 10 "$REPO_ROOT/cerberus.sh" run
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"refusing to start"* ]]
+}
+
+@test "scan refuses on an untrusted config, dryscan warns and continues" {
+  local payload="$TEST_TMP/let"
+  printf 'payload\n' > "$payload"; chmod 755 "$payload"
+  sig malware_paths.txt "$payload"
+  chmod 666 "$CERBERUS_CONF_DIR/cerberus.env"
+
+  run "$REPO_ROOT/cerberus.sh" scan
+  [ "$status" -ne 0 ]
+  run stat -c '%a' "$payload"
+  [ "$output" = "755" ]           # nothing was acted on
+
+  run "$REPO_ROOT/cerberus.sh" dryscan
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"continuing anyway"* ]]
+  [[ "$output" == *"HARD|malware_path"* ]]
+}

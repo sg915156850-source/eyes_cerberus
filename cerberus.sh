@@ -71,7 +71,20 @@ cmd_run() {
   export CERBERUS_PASS=0
   local hb_every=$(( 3600 / (SENSOR_INTERVAL > 0 ? SENSOR_INTERVAL : 30) ))
   [ "$hb_every" -lt 1 ] && hb_every=1
+  local conf_every="${PERSISTENCE_EVERY:-10}"
   while true; do
+    # The startup check is not enough on its own: permissions can be loosened
+    # while the daemon runs. Re-checking costs a handful of stat calls. On
+    # failure the daemon keeps watching and reporting but stops acting --
+    # exiting would leave the host unwatched, and acting on a config someone
+    # else can rewrite is how the responder gets pointed at a real service.
+    if [ "$AUTO_RESPONSE" = "1" ] && [ $(( CERBERUS_PASS % conf_every )) -eq 0 ]; then
+      if ! check_config_perms; then
+        AUTO_RESPONSE=0
+        emit_event HARD config_untrusted "-" \
+          "config or signatures became writable by someone other than root -- auto-response disabled for this run"
+      fi
+    fi
     one_pass act || warn "detector pass returned $?"
     rotate_logs
     CERBERUS_PASS=$(( CERBERUS_PASS + 1 ))
