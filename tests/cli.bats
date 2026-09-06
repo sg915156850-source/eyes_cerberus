@@ -9,6 +9,22 @@ setup() {
   fixture crontab_out ""
   fixture systemctl_unit_files ""
   fixture systemctl_units_running ""
+
+  # These tests drive the real entry points, so a full pass runs against the
+  # real host: whatever memfd process or listening port the CI runner happens
+  # to have would land in events.jsonl alongside what the test set up. Leave
+  # only the detector under test enabled.
+  cat > "$CERBERUS_CONF_DIR/cerberus.env" <<'EOF'
+DETECT_HIGH_CPU=0
+DETECT_NEW_LISTENER=0
+DETECT_PERSISTENCE=0
+DETECT_UPX_NEW=0
+DETECT_REVSHELL=0
+DETECT_FILELESS=0
+DETECT_SETUID=0
+DETECT_LOADER=0
+EOF
+  chmod 600 "$CERBERUS_CONF_DIR/cerberus.env"
 }
 
 @test "cerberus.sh version prints the version" {
@@ -52,8 +68,9 @@ setup() {
 
   run stat -c '%a' "$payload"
   [ "$output" = "0" ]
-  run jq -er '.category' "$CERBERUS_STATE_DIR/events.jsonl"
-  [ "$output" = "malware_path" ]
+  run jq -esr '[.[] | select(.category == "malware_path")] | length' \
+    "$CERBERUS_STATE_DIR/events.jsonl"
+  [ "$output" = "1" ]
 }
 
 @test "notify-failure records that the daemon stopped watching" {
