@@ -11,7 +11,7 @@ tiers: high-confidence signatures are auto-contained, heuristics only alert.
 
 ## Status
 
-- **v2.1** — installable on any host (`install.sh` or a `.deb`), 128 tests in
+- **v2.1** — installable on any host (`install.sh` or a `.deb`), 141 tests in
   CI across Debian 12, Ubuntu 24.04 and AlmaLinux 9, and detectors that are not
   tied to one machine's incident. See `CHANGELOG.md` and `ROADMAP.md`.
 - **v2.0** — the rewrite into a single supervised daemon. The v1 layout had

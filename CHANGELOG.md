@@ -17,7 +17,7 @@ that dropper.
   the code, an installed copy uses the FHS paths. `CERBERUS_LAYOUT`,
   `CERBERUS_CONF_DIR` and `CERBERUS_STATE_DIR` override it.
 - `Makefile` (`lint test check install uninstall deb`) and a `bats` suite of
-  128 tests that runs as an ordinary user against shimmed `ps`/`ss`/`iptables`/
+  141 tests that run as an ordinary user against shimmed `ps`/`ss`/`iptables`/
   `systemctl`/`crontab` and never touches the host.
 - CI: lint and tests on Ubuntu, the suite again in Debian 12, Ubuntu 24.04 and
   AlmaLinux 9, a `.deb` built and installed into a clean Debian with the layout
