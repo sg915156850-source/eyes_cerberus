@@ -8,12 +8,20 @@ set -uo pipefail
 
 ROOT="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 UNIT="eyes-cerberus.service"
-EVENTS="$ROOT/state/events.jsonl"
 
+# Sourced for the layout resolution (repo vs installed) and read_sig(), so the
+# wrapper reads the same config and state the daemon does instead of assuming
+# everything lives under the checkout.
+# shellcheck source=lib/common.sh
+source "$ROOT/lib/common.sh"
+EVENTS="$EVENTS_LOG"
+
+# Named apart from common.sh's log()/warn(): those write to the run log with a
+# timestamp, these are terminal chrome for a human reading the output.
 RED=$'\033[0;31m'; GRN=$'\033[0;32m'; YEL=$'\033[1;33m'; NC=$'\033[0m'
-ok()   { echo "${GRN}[+]${NC} $*"; }
-warn() { echo "${YEL}[!]${NC} $*"; }
-bad()  { echo "${RED}[-]${NC} $*"; }
+say_ok()   { echo "${GRN}[+]${NC} $*"; }
+say_warn() { echo "${YEL}[!]${NC} $*"; }
+say_bad()  { echo "${RED}[-]${NC} $*"; }
 
 have_unit() { systemctl list-unit-files 2>/dev/null | grep -q "^${UNIT}"; }
 
@@ -22,30 +30,31 @@ cmd_status() {
   if have_unit; then
     systemctl --no-pager --lines=0 status "$UNIT" 2>/dev/null | head -6
     if systemctl is-active --quiet "$UNIT"; then
-      ok "daemon: active ($(systemctl show -p MainPID --value "$UNIT"))"
+      say_ok "daemon: active ($(systemctl show -p MainPID --value "$UNIT"))"
     else
-      bad "daemon: NOT active  ->  sudo systemctl start $UNIT"
+      say_bad "daemon: NOT active  ->  sudo systemctl start $UNIT"
     fi
   else
-    bad "unit not installed  ->  see 'Install' below"
+    say_bad "unit not installed  ->  see 'Install' below"
     echo "  sudo cp $ROOT/systemd/$UNIT /etc/systemd/system/"
     echo "  sudo systemctl daemon-reload && sudo systemctl enable --now $UNIT"
   fi
   echo
   echo "=== C2 firewall ==="
   if command -v iptables >/dev/null 2>&1; then
-    iptables -S 2>/dev/null | grep -E 'DROP' | grep -Ef <(sed -e 's/#.*//' -e '/^$/d' "$ROOT/etc/signatures/c2_ips.txt" "$ROOT/etc/signatures/c2_ports.txt" 2>/dev/null) \
-      && ok "C2 DROP rules present" || warn "no matching C2 DROP rules (daemon applies them on start)"
+    iptables -S 2>/dev/null | grep -E 'DROP' \
+      | grep -Ef <(read_sig c2_ips.txt; read_sig c2_ports.txt) \
+      && say_ok "C2 DROP rules present" || say_warn "no matching C2 DROP rules (daemon applies them on start)"
   else
-    warn "iptables not available"
+    say_warn "iptables not available"
   fi
   echo
   echo "=== Known dropper paths ==="
   local p found=0
   while read -r p; do
-    [ -e "$p" ] && { bad "PRESENT: $p"; found=1; }
-  done < <(sed -e 's/#.*//' -e '/^$/d' "$ROOT/etc/signatures/malware_paths.txt" 2>/dev/null)
-  [ "$found" = 0 ] && ok "none present"
+    [ -e "$p" ] && { say_bad "PRESENT: $p"; found=1; }
+  done < <(read_sig malware_paths.txt)
+  [ "$found" = 0 ] && say_ok "none present"
   echo
   cmd_digest 1
 }
@@ -53,7 +62,7 @@ cmd_status() {
 cmd_digest() {
   local days="${1:-1}"
   echo "=== Events (last ${days}d) ==="
-  [ -f "$EVENTS" ] || { warn "no events log yet ($EVENTS)"; return 0; }
+  [ -f "$EVENTS" ] || { say_warn "no events log yet ($EVENTS)"; return 0; }
   local since; since="$(date -d "-${days} days" +%s 2>/dev/null || echo 0)"
   awk -v since="$since" '
     {

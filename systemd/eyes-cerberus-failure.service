@@ -1,0 +1,19 @@
+# Fired by OnFailure= in eyes-cerberus.service.
+#
+# The point: a host defense daemon cannot tell you it has stopped defending.
+# systemd restarts it forever (Restart=always, StartLimitIntervalSec=0), so
+# this only runs when the unit genuinely gives up or is killed in a way that
+# stops it for good -- which is also what an attacker with root does first.
+#
+# Path is rewritten by install.sh, like the main unit.
+
+[Unit]
+Description=Eyes Cerberus failure notification
+Documentation=https://github.com/sg915156850-source/eyes_cerberus
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/eyes-cerberus
+ExecStart=/opt/eyes-cerberus/cerberus.sh notify-failure
+User=root
+SyslogIdentifier=cerberus-failure

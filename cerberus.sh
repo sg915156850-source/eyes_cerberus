@@ -72,11 +72,21 @@ cmd_run() {
   done
 }
 
+# Invoked by eyes-cerberus-failure.service (OnFailure=). One notification, and
+# an event in the log so a later digest shows the gap was noticed.
+cmd_notify_failure() {
+  local since=""
+  since="$(systemctl show -p ExecMainExitTimestamp --value eyes-cerberus.service 2>/dev/null || true)"
+  emit_event HARD daemon_down "-" \
+    "eyes-cerberus.service entered a failed state${since:+ at $since} -- host is no longer being watched"
+}
+
 case "${1:-run}" in
   run)      cmd_run ;;
   scan)     info "manual scan"; one_pass act ;;
   dryscan)  CERBERUS_DRY_RUN=1 DRY_RUN=1 one_pass noact ;;
   baseline) baseline_build ;;
+  notify-failure) cmd_notify_failure ;;
   version|-v|--version) echo "eyes-cerberus $VERSION" ;;
   *)
     cat <<EOF
@@ -86,6 +96,7 @@ Usage: $0 {run|scan|dryscan|baseline|version}
   scan      one pass: detect + respond
   dryscan   one pass: detect + print only, no action
   baseline  rebuild persistence baseline from current host state
+  notify-failure  emit a "daemon is down" alert (used by OnFailure=)
 EOF
     exit 1 ;;
 esac

@@ -51,6 +51,9 @@ tiers: high-confidence signatures are auto-contained, heuristics only alert.
 ```
 cerberus.sh              daemon: run | scan | dryscan | baseline
 master.sh                control wrapper over systemd + events log
+install.sh uninstall.sh  system install/removal (see Install)
+Makefile                 lint | test | check | install | deb
+packaging/build-deb.sh   .deb builder (needs only dpkg-deb)
 lib/
   common.sh              config load, log(), notify(), run() (dry-run-aware), signature helpers
   detect.sh              all detectors -> SEVERITY|CATEGORY|PID|DETAIL lines
@@ -61,7 +64,7 @@ etc/
   cerberus.env.example   copy to cerberus.env and edit (cerberus.env is git-ignored)
   whitelist.txt          process names exempt from CPU/miner heuristics
   signatures/            malware_md5, c2_ips, c2_ports, miner_patterns, malware_paths
-systemd/eyes-cerberus.service
+systemd/                 eyes-cerberus.service + eyes-cerberus-failure.service
 ir/                      MANUAL incident-response tools (not run by the daemon)
   quick_response.sh  emergency_remediation.sh  docker/
   experimental/          unsupported, excluded from packages -- see its README
@@ -104,21 +107,69 @@ this host are known security-test artifacts; the daemon does not scan top-level
 ## Install
 
 ```bash
-cd /root/projects/eyes_cerberus
-cp etc/cerberus.env.example etc/cerberus.env      # edit thresholds / notify
-./cerberus.sh dryscan                             # sanity check: prints findings, no action
-
-# If an older Eyes Cerberus unit is installed, this file replaces it in place.
-sudo cp systemd/eyes-cerberus.service /etc/systemd/system/eyes-cerberus.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now eyes-cerberus.service
-./master.sh status                                # -> daemon: active (<pid>)
+sudo ./install.sh            # install or upgrade, nothing is started
+sudo ./install.sh --enable   # ... and enable + start the unit
+sudo ./install.sh --dry-run  # print what it would do
 ```
+
+That gives you:
+
+| Path | Holds |
+|---|---|
+| `/opt/eyes-cerberus` | code |
+| `/etc/eyes-cerberus` | `cerberus.env`, `whitelist.txt`, `signatures/` |
+| `/var/lib/eyes-cerberus` | `events.jsonl`, `evidence/`, `quarantine/`, `baseline/` |
+| `/usr/local/sbin/cerberus` | symlink to `master.sh` |
+
+The installer is idempotent: re-running upgrades the code and never overwrites
+an edited signature file, `whitelist.txt` or `cerberus.env`. Upgrading from an
+older repo-local install carries `state/` across, so the first pass afterwards
+does not report every existing cron job as new. `sudo ./uninstall.sh` reverses
+it and keeps evidence and quarantine unless you pass `--purge`.
+
+A Debian package is available too:
+
+```bash
+make deb                                   # -> dist/eyes-cerberus_<version>_all.deb
+sudo dpkg -i dist/eyes-cerberus_*_all.deb
+```
+
+Then, before starting:
+
+```bash
+sudo $EDITOR /etc/eyes-cerberus/cerberus.env
+sudo /opt/eyes-cerberus/cerberus.sh dryscan   # every detector, no action taken
+sudo systemctl enable --now eyes-cerberus.service
+cerberus status                               # -> daemon: active (<pid>)
+```
+
+### Running from the checkout instead
+
+The daemon works either way and picks the layout itself: if `etc/signatures/`
+sits next to the code it uses the checkout (`./etc`, `./state`) — otherwise it
+uses `/etc/eyes-cerberus` and `/var/lib/eyes-cerberus`. Force it with
+`CERBERUS_LAYOUT=repo|fhs`, or point `CERBERUS_CONF_DIR` / `CERBERUS_STATE_DIR`
+at the directories directly (this is how the tests run, and how a second
+instance on one host would).
+
+```bash
+cp etc/cerberus.env.example etc/cerberus.env
+./cerberus.sh dryscan
+sudo cp systemd/eyes-cerberus.service /etc/systemd/system/   # edit the paths first
+```
+
+### If the daemon dies
+
+`eyes-cerberus.service` has `OnFailure=eyes-cerberus-failure.service`, which
+sends one `daemon_down` alert through the configured `NOTIFY_METHOD`. systemd
+restarts the daemon forever, so this only fires when it stops for good — which
+is also the first thing an attacker with root arranges. A host that has gone
+quiet is not the same as a host that is clean.
 
 Optional daily digest (writes nothing external, just to the journal):
 
 ```cron
-0 9 * * *  /root/projects/eyes_cerberus/master.sh digest 1 | systemd-cat -t cerberus-digest
+0 9 * * *  /opt/eyes-cerberus/master.sh digest 1 | systemd-cat -t cerberus-digest
 ```
 
 iptables rules are re-applied by the daemon on every start. If you also want them

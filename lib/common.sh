@@ -19,10 +19,41 @@ done
 CERBERUS_ROOT="$(cd -P "$(dirname "$_common_src")/.." >/dev/null 2>&1 && pwd)"
 export CERBERUS_ROOT
 
-# --- Canonical layout -------------------------------------------------------
-ETC_DIR="$CERBERUS_ROOT/etc"
+# --- Layout -----------------------------------------------------------------
+# Two supported layouts, because the same tree is both a git checkout you hack
+# on and something a package installs system-wide:
+#
+#   repo  config + state inside the checkout ($ROOT/etc, $ROOT/state).
+#         This is what a clone gives you and what the old versions did.
+#   fhs   config in /etc/eyes-cerberus, state in /var/lib/eyes-cerberus,
+#         code in /opt/eyes-cerberus. What install.sh and the .deb produce.
+#
+# Chosen by looking for $ROOT/etc/signatures: a checkout has one, an installed
+# copy does not (install.sh moves etc/ to /etc/eyes-cerberus). Override with
+# CERBERUS_LAYOUT=repo|fhs, or point CERBERUS_CONF_DIR / CERBERUS_STATE_DIR
+# straight at the directories -- the tests use those, and so can a second
+# instance on the same host.
+CERBERUS_LAYOUT="${CERBERUS_LAYOUT:-auto}"
+if [ "$CERBERUS_LAYOUT" = "auto" ]; then
+  if [ -d "$CERBERUS_ROOT/etc/signatures" ]; then
+    CERBERUS_LAYOUT=repo
+  else
+    CERBERUS_LAYOUT=fhs
+  fi
+fi
+
+case "$CERBERUS_LAYOUT" in
+  repo) _def_conf="$CERBERUS_ROOT/etc";     _def_state="$CERBERUS_ROOT/state" ;;
+  fhs)  _def_conf="/etc/eyes-cerberus";     _def_state="/var/lib/eyes-cerberus" ;;
+  *)    printf 'cerberus: unknown CERBERUS_LAYOUT=%s (want auto|repo|fhs)\n' \
+          "$CERBERUS_LAYOUT" >&2; return 1 2>/dev/null || exit 1 ;;
+esac
+
+ETC_DIR="${CERBERUS_CONF_DIR:-$_def_conf}"
+STATE_DIR="${CERBERUS_STATE_DIR:-$_def_state}"
+export CERBERUS_LAYOUT
+
 SIG_DIR="$ETC_DIR/signatures"
-STATE_DIR="$CERBERUS_ROOT/state"
 EVIDENCE_DIR="$STATE_DIR/evidence"
 QUARANTINE_DIR="$STATE_DIR/quarantine"
 BASELINE_DIR="$STATE_DIR/baseline"
@@ -31,7 +62,15 @@ RUN_LOG="$STATE_DIR/cerberus.log"
 WHITELIST_FILE="$ETC_DIR/whitelist.txt"
 CONFIG_FILE="$ETC_DIR/cerberus.env"
 
-mkdir -p "$STATE_DIR" "$EVIDENCE_DIR" "$QUARANTINE_DIR" "$BASELINE_DIR"
+# State holds evidence and quarantined malware: root-only, and a hard failure
+# if we cannot have it. Everything downstream assumes these exist.
+if ! mkdir -p "$STATE_DIR" "$EVIDENCE_DIR" "$QUARANTINE_DIR" "$BASELINE_DIR" 2>/dev/null; then
+  printf 'cerberus: cannot create state directory %s (need root, or set CERBERUS_STATE_DIR)\n' \
+    "$STATE_DIR" >&2
+  return 1 2>/dev/null || exit 1
+fi
+chmod 750 "$STATE_DIR" 2>/dev/null || true
+chmod 700 "$QUARANTINE_DIR" "$EVIDENCE_DIR" 2>/dev/null || true
 
 # --- Config defaults (overridden by etc/cerberus.env) ----------------------
 # These are read by the sourcing modules, not by this file; shellcheck cannot

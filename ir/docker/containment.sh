@@ -208,8 +208,9 @@ move_malware_to_containment() {
         "/tmp/let:/isolated/tmp/let_tmp"
     )
     
-    local CONTAINER_ID=$(docker ps -q -f name=$CONTAINER_NAME)
+    local CONTAINER_ID
     
+    CONTAINER_ID=$(docker ps -q -f name=$CONTAINER_NAME)
     for mapping in "${MALWARE_PATHS[@]}"; do
         local src="${mapping%%:*}"
         local dst="${mapping##*:}"
@@ -219,10 +220,12 @@ move_malware_to_containment() {
             docker cp "$src" "$CONTAINER_ID:$dst"
             
             # Сохраняем метаданные
-            local hash=$(md5sum "$src" | cut -d' ' -f1)
-            local perms=$(stat -c '%a' "$src")
-            local size=$(stat -c '%s' "$src")
-            
+            local hash
+            hash=$(md5sum "$src" | cut -d' ' -f1)
+            local perms
+            perms=$(stat -c '%a' "$src")
+            local size
+            size=$(stat -c '%s' "$src")
             echo "Файл: $src" >> "$CONTAINMENT_DIR/metadata.log"
             echo "  Копия в: $dst" >> "$CONTAINMENT_DIR/metadata.log"
             echo "  MD5: $hash" >> "$CONTAINMENT_DIR/metadata.log"
@@ -265,8 +268,8 @@ create_decoy_files() {
     
     for path in "${MALWARE_PATHS[@]}"; do
         if [ -f "$path" ]; then
-            local size=$(stat -c '%s' "$path")
-            
+            local size
+            size=$(stat -c '%s' "$path")
             # Сохраняем оригинал в контейнере (уже сделано выше)
             # Создаём пустышку на оригинальном месте
             # dd if=/dev/zero of="$path.tmp" bs=1 count=$size 2>/dev/null
@@ -318,9 +321,10 @@ status_report() {
     
     # Статус контейнера
     if docker ps -a --format '{{.Names}}' | grep -q "$CONTAINER_NAME"; then
-        local status=$(docker inspect -f '{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null)
-        local started=$(docker inspect -f '{{.State.StartedAt}}' "$CONTAINER_NAME" 2>/dev/null)
-        
+        local status
+        status=$(docker inspect -f '{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null)
+        local started
+        started=$(docker inspect -f '{{.State.StartedAt}}' "$CONTAINER_NAME" 2>/dev/null)
         if [ "$status" = "running" ]; then
             success "Контейнер изоляции: РАБОТАЕТ"
         else
@@ -340,8 +344,10 @@ status_report() {
     # Проверяем оригинальные файлы
     for path in /let /var/let /dev/let /dev/shm/let /etc/let /tmp/let; do
         if [ -f "$path" ]; then
-            local perms=$(stat -c '%a' "$path" 2>/dev/null)
-            local size=$(stat -c '%s' "$path" 2>/dev/null)
+            local perms
+            perms=$(stat -c '%a' "$path" 2>/dev/null)
+            local size
+            size=$(stat -c '%s' "$path" 2>/dev/null)
             if [ "$perms" = "0" ]; then
                 warning "$path - ЗАБЛОКИРОВАН (perms: $perms, size: $size)"
             else
