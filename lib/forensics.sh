@@ -68,12 +68,27 @@ snapshot_pid() {
   echo "$out"
 }
 
+# _printable_strings <file> : printable runs from a binary.
+#
+# strings(1) is binutils, which a minimal server does not have. Without a
+# fallback the evidence file kept for a quarantined payload just had an empty
+# section where its strings should be -- and evidence is the whole reason the
+# original is preserved rather than deleted.
+_printable_strings() {
+  if command -v strings >/dev/null 2>&1; then
+    strings "$1" 2>/dev/null
+  else
+    LC_ALL=C grep -a -o '[[:print:]]\{4,\}' "$1" 2>/dev/null
+  fi
+}
+
 # snapshot_file <path> <tag>
 # Records metadata + hashes for a suspicious file without touching it.
 snapshot_file() {
   local f="$1" tag="${2:-file}"
   local ts; ts="$(date +%Y%m%d_%H%M%S)"
-  local out="$EVIDENCE_DIR/${ts}_file_$(basename "$f")_${tag}.txt"
+  local base; base="$(basename "$f")"
+  local out="$EVIDENCE_DIR/${ts}_file_${base}_${tag}.txt"
   {
     echo "=== Cerberus evidence: FILE=$f TAG=$tag ==="
     echo "collected: $(date -Iseconds)"
@@ -87,7 +102,7 @@ snapshot_file() {
     file "$f" 2>&1 || true
     echo
     echo "--- strings (first 60) ---"
-    strings "$f" 2>/dev/null | head -60 || true
+    _printable_strings "$f" | head -60 || true
   } > "$out" 2>&1
   echo "$out"
 }

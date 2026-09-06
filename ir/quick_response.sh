@@ -19,8 +19,9 @@ sig(){ sed -e 's/#.*//' -e '/^[[:space:]]*$/d' -e 's/^[[:space:]]*//;s/[[:space:
 
 # PIDs whose executable IS $1 (exact /proc/<pid>/exe match, not an argv match).
 pids_executing(){
-  local t="$1" pid exe
-  for pid in $(ls /proc 2>/dev/null | grep -E '^[0-9]+$'); do
+  local t="$1" d pid exe
+  for d in /proc/[0-9]*; do
+    pid="${d#/proc/}"
     exe="$(readlink "/proc/$pid/exe" 2>/dev/null || true)"; exe="${exe% (deleted)}"
     [ "$exe" = "$t" ] && echo "$pid"
   done

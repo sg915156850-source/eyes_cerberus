@@ -1,73 +1,74 @@
-# 🔒 Security Policy
+# Security policy
 
-## Reporting a Vulnerability
+Eyes Cerberus runs as a root daemon on the host it protects. It kills
+processes, changes file permissions and edits firewall rules. A defect here is
+not an inconvenience — it is either a way to take the host down or a way to
+gain root on it. Reports are welcome.
 
-We take the security of Eyes Cerberus seriously. If you discover a security vulnerability, please follow these steps:
+## Reporting
 
-### DO NOT
+Email **sg915156850@gmail.com** with `[cerberus]` in the subject. Please do not
+open a public issue for anything in the "In scope" list below.
 
-- ❌ Do not open a public issue on GitHub
-- ❌ Do not disclose the vulnerability publicly
-- ❌ Do not share sensitive information in public channels
+Include what you have: affected version (`./cerberus.sh version`), affected
+file and line, how to reproduce, and what an attacker gets out of it. A rough
+report that is correct beats a polished one that is not.
 
-### DO
+Expect an acknowledgement within a few days. This is a one-person project, not
+a vendor with an on-call rotation — timelines below are intentions, not an SLA.
 
-- ✅ Send a detailed report to: [YOUR_EMAIL_HERE]
-- ✅ Include steps to reproduce the issue
-- ✅ Provide potential impact assessment
-- ✅ Allow reasonable time for response and fix
+| Stage | Target |
+|---|---|
+| Acknowledgement | 3 days |
+| Assessment, in or out of scope | 7 days |
+| Fix for an in-scope issue | depends on severity, communicated in the assessment |
 
-## What to Include
+## In scope
 
-When reporting a vulnerability, please include:
+- **Privilege escalation into the daemon.** Anything that lets a non-root user
+  influence what the root daemon executes: writable config or signature files,
+  unsafe expansion of attacker-controlled process arguments, a path in
+  `state/` that a local user can pre-create or replace with a symlink.
+- **Response abuse.** Making the daemon kill or neutralise a process or file it
+  should not — for example, crafting an argv or a filename that gets a
+  legitimate service classified as HARD.
+- **Detection bypass that the design does not already admit.** The daemon is
+  explicitly signature- and heuristic-based, so "a renamed binary is not
+  matched by hash" is documented behaviour, not a vulnerability. "A process
+  that the `c2_socket` detector structurally cannot see" is one.
+- **Evidence tampering.** A local user corrupting or forging
+  `state/events.jsonl` or the quarantine metadata.
+- **Secret disclosure.** Anything that copies `etc/cerberus.env` (it may hold a
+  Telegram token) or captured `/proc/<pid>/environ` content somewhere
+  world-readable.
 
-1. **Description** - Clear description of the vulnerability
-2. **Impact** - What could an attacker achieve?
-3. **Reproduction** - Steps to reproduce the issue
-4. **Affected Versions** - Which versions are affected?
-5. **Suggested Fix** - If you have suggestions
+## Out of scope
 
-## Response Timeline
+- Missing detections for malware families the signatures do not describe. Add
+  the indicator to `etc/signatures/` — that is the documented way to extend
+  coverage.
+- False positives from the SOFT heuristics. They are alert-only by design;
+  report them as ordinary issues.
+- Anything requiring root on the host to begin with. Root can stop the daemon;
+  that is not a bypass, it is the threat model.
+- `ir/experimental/` — unsupported, not run by the daemon, see
+  `ir/experimental/README.md`.
 
-- **Initial Response**: Within 48 hours
-- **Status Update**: Within 5 business days
-- **Fix Timeline**: Depends on severity (will be communicated)
+## Hardening notes for operators
 
-## Security Best Practices
+- Keep `etc/cerberus.env` and `etc/signatures/` writable by root only. The
+  daemon refuses to start otherwise: the config is sourced as bash by a root
+  process, so write access to it is root access.
+- Run `./cerberus.sh dryscan` after every signature or threshold change. It
+  runs every detector and takes no action.
+- Set `AUTO_RESPONSE=0` while tuning on a host you cannot afford to disrupt.
+  HARD findings still collect forensics and notify.
+- Evidence and quarantine live on the host being defended. An attacker who
+  keeps root can destroy both — copy `state/` off the box if it matters.
 
-### Before Deploying
+## Known limitations
 
-- [ ] Review all scripts for your environment
-- [ ] Update C2 IPs in `defense_config.cfg`
-- [ ] Configure whitelist for your processes
-- [ ] Test in isolated environment first
-
-### After Deployment
-
-- [ ] Monitor logs regularly
-- [ ] Update known malware hashes
-- [ ] Review and rotate any credentials
-- [ ] Keep the system updated
-
-## Known Limitations
-
-This system:
-- Does NOT replace antivirus software
-- Does NOT guarantee 100% protection
-- Does NOT delete malware (preserves evidence)
-- Requires root/admin privileges
-
-## Security Audit Checklist
-
-Before making this system public:
-
-- [ ] No API keys in code
-- [ ] No passwords in configs
-- [ ] No personal information
-- [ ] No internal IP addresses
-- [ ] No SSH keys
-- [ ] All credentials use placeholders
-
----
-
-**Thank you for helping keep Eyes Cerberus secure!** 👁️
+This is a narrow safety net, not an antivirus, not an EDR, and not a substitute
+for patching, least privilege and backups. It does not delete malware
+(originals are `chmod 000` and kept for forensics) and it does not guarantee
+protection.

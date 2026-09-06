@@ -7,6 +7,9 @@ state/
 # Local config (may contain a Telegram token / webhook URL).
 etc/cerberus.env
 
+# Build output (make deb).
+dist/
+
 # Legacy runtime artefacts (pre-2.0 layout), in case an old checkout is around.
 *.pid
 *.out
