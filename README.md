@@ -11,13 +11,16 @@ tiers: high-confidence signatures are auto-contained, heuristics only alert.
 
 ## Status
 
-- **v2.0** — full rewrite into a single supervised daemon. See `CHANGELOG.md`
-  for what changed and why (the v1 layout had been dead for weeks: a
-  `Type=oneshot` unit whose `nohup` workers nothing restarted, detect loops that
-  aborted on the first empty `grep`, and a CPU heuristic that SIGKILLed
-  `unattended-upgrade` / `fwupd` / `pg_dump`).
+- **v2.1** — installable on any host (`install.sh` or a `.deb`), 128 tests in
+  CI across Debian 12, Ubuntu 24.04 and AlmaLinux 9, and detectors that are not
+  tied to one machine's incident. See `CHANGELOG.md` and `ROADMAP.md`.
+- **v2.0** — the rewrite into a single supervised daemon. The v1 layout had
+  been dead for weeks: a `Type=oneshot` unit whose `nohup` workers nothing
+  restarted, detect loops that aborted on the first empty `grep`, and a CPU
+  heuristic that SIGKILLed `unattended-upgrade` / `fwupd` / `pg_dump`.
 - Known indicators for this host are tracked in `KNOWN_THREATS.md`; the
-  machine-readable form is `etc/signatures/`.
+  machine-readable form is `etc/signatures/`, and `update-sigs` keeps a bundle
+  current on hosts that never met this particular dropper.
 - The daemon is **enabled via systemd** once you run the Install steps below.
   Until then nothing is watching — `./master.sh status` tells you which.
 

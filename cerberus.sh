@@ -38,7 +38,7 @@ source "$_dir/lib/sigupdate.sh"
 # shellcheck source=lib/report.sh
 source "$_dir/lib/report.sh"
 
-VERSION="2.0.0"
+VERSION="2.1.0"
 
 one_pass() {
   local act="$1"   # act | noact
