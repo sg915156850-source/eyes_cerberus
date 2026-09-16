@@ -277,13 +277,32 @@ detect_revshell() {
   pat="$(read_sig revshell_patterns.txt | paste -sd'|' -)"
   [ -n "$pat" ] || return 0
 
+  # One grep for the whole process table, not one per process: this pattern's
+  # bounded `.{0,200}` alternatives make glibc's regex compiler expensive to
+  # (re)build (~0.5s), and a fresh `grep` per line pays that cost every time.
+  # On a host with a few hundred processes that turned a 30s sensor pass into
+  # several minutes -- compiling once against the whole table is what the
+  # cheap-and-narrow pattern design here actually depends on.
+  #
+  # grep has to see argv alone, not "pid argv": these patterns anchor on `^`
+  # meaning "start of the command", which a leading pid number would break.
+  # So pid and argv are collected in parallel arrays, argv is matched in one
+  # pass, and `grep -n`'s line number maps a hit back to its pid.
+  local -a pids=() argvs=()
   local pid args
   while read -r pid args; do
     [[ "$pid" =~ ^[0-9]+$ ]] || continue
     [ "$pid" = "$$" ] && continue          # never report the scan itself
-    echo "$args" | grep -qiE "$pat" || continue
-    echo "SOFT|revshell|$pid|reverse-shell shaped argv: $(echo "$args" | tr -s ' ')"
+    pids+=("$pid")
+    argvs+=("$args")
   done < <(ps -eo pid=,args= 2>/dev/null)
+  [ "${#argvs[@]}" -gt 0 ] || return 0
+
+  local n
+  while read -r n; do
+    [[ "$n" =~ ^[0-9]+$ ]] || continue
+    echo "SOFT|revshell|${pids[$((n - 1))]}|reverse-shell shaped argv: $(echo "${argvs[$((n - 1))]}" | tr -s ' ')"
+  done < <(printf '%s\n' "${argvs[@]}" | grep -niE "$pat" | cut -d: -f1)
 }
 
 #---------------------------------------------------------------------------
