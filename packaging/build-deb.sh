@@ -58,7 +58,7 @@ Priority: optional
 Architecture: all
 Depends: bash (>= 4.4), coreutils, procps, iproute2, iptables
 Installed-Size: $INSTALLED_SIZE
-Maintainer: Eyes Cerberus <sg915156850@gmail.com>
+Maintainer: Eyes Cerberus <245840742+sg915156850-source@users.noreply.github.com>
 Homepage: https://github.com/sg915156850-source/eyes_cerberus
 Description: Host defense daemon for a single Linux server
  A supervised daemon that watches processes, sockets and persistence points

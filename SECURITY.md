@@ -7,8 +7,9 @@ gain root on it. Reports are welcome.
 
 ## Reporting
 
-Email **sg915156850@gmail.com** with `[cerberus]` in the subject. Please do not
-open a public issue for anything in the "In scope" list below.
+Use GitHub's private vulnerability reporting: the "Security" tab on this repo
+→ "Report a vulnerability". Please do not open a public issue for anything in
+the "In scope" list below.
 
 Include what you have: affected version (`./cerberus.sh version`), affected
 file and line, how to reproduce, and what an attacker gets out of it. A rough
