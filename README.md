@@ -111,9 +111,10 @@ state/                   runtime (git-ignored): events.jsonl, evidence/, quarant
 | `upx_new` | a newly-appeared UPX-packed executable in a world-writable dir |
 | `egress` | new outbound connection to a non-whitelisted external IP (**off by default**, noisy) |
 
-Out of scope by design: the `/root/.botnet_c2` and `/root/.sys_test_*` markers on
-this host are known security-test artifacts; the daemon does not scan top-level
-`/root` dotfiles.
+Out of scope by design: the persistence/dotfile checks above only cover the
+specific paths listed (crontab, `cron.*`, systemd units, `authorized_keys`,
+shell rc files, `ld.so.preload`, etc.) — the daemon does not scan arbitrary
+top-level dotfiles or directories under `/root`.
 
 ---
 

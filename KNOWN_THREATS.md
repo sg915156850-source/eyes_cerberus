@@ -6,8 +6,8 @@ this file is the human context.
 
 ## Incident: `/let` dropper + `nc` C2 beacon (2026-03 → 2026-04)
 
-A compromised application (`/root/NaviomSite/server-deploy/site`, a Next.js build)
-was spawning a UPX-packed ELF backdoor. Behaviour observed:
+A compromised Next.js application deployed on this host was spawning a
+UPX-packed ELF backdoor. Behaviour observed:
 
 - payload written to `/let` (and attempted at `/var/let`, `/dev/let`, `/dev/shm/let`,
   `/etc/let`, `/tmp/let`), made executable, run as root;

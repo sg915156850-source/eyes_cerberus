@@ -239,13 +239,6 @@ move_malware_to_containment() {
             warning "Файл не найден: $src"
         fi
     done
-    
-    # Копируем малварь из standalone директории
-    if [ -f "/root/NaviomSite/server-deploy/site/.next/standalone/let" ]; then
-        docker cp "/root/NaviomSite/server-deploy/site/.next/standalone/let" \
-                  "$CONTAINER_ID:/malware/let_standalone"
-        success "Скопировано: standalone/let"
-    fi
 }
 
 #===============================================================================

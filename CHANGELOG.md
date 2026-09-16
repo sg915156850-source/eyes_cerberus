@@ -114,4 +114,5 @@ detect loops abort on the first `grep` with no match.
 - `watcher.sh`, `defense/anti_malware.sh` (merged into `lib/detect.sh`).
 - `auto_containment.sh` (superseded by `lib/respond.sh`), `docker_containment_quickstart.sh`.
 - `config.cfg`, `defense/defense_config.cfg` references → single `etc/cerberus.env`.
-- Incident-specific hardcoding (`NaviomSite`, fixed PIDs, `next-server v15`).
+- Incident-specific hardcoding (a hardcoded incident project path, fixed PIDs,
+  `next-server v15`).
