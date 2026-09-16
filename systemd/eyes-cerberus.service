@@ -17,6 +17,9 @@ Wants=network-online.target
 # The daemon cannot report its own death. If it exits for good, this fires one
 # notification through the configured NOTIFY_METHOD.
 OnFailure=eyes-cerberus-failure.service
+# Rate-limits Restart= churn. This belongs here, not in [Service]: systemd
+# silently ignores it there ("Unknown key name ... in section 'Service'").
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -24,7 +27,6 @@ WorkingDirectory=/opt/eyes-cerberus
 ExecStart=/opt/eyes-cerberus/cerberus.sh run
 Restart=always
 RestartSec=5
-StartLimitIntervalSec=0
 TimeoutStopSec=15
 
 # Needs root: kill arbitrary PIDs, read /proc/<pid>/{exe,environ}, chmod files
