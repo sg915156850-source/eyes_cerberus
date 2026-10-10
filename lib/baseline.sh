@@ -23,6 +23,22 @@ PAM_DIR="${PAM_DIR:-/etc/pam.d}"
 # are the places a fresh setuid root shell actually shows up.
 SETUID_DIRS="${SETUID_DIRS:-/tmp /var/tmp /dev/shm /home /root /opt /srv /usr/local}"
 
+# Every category the snapshot records, in diff order. baseline_build writes this
+# list to $BASELINE_DIR/.categories, so a later version that adds a category can
+# tell "never recorded" from "recorded, and it was empty".
+BASELINE_CATEGORIES="crontab cron_system units units_running root_authorized_keys
+  root_shell_rc ld_preload accounts sudoers sshd_config pam setuid"
+
+# A baseline written before that list existed (v2.1.0 and older) does not say
+# what it captured, and v2.1.0 created an empty file for every category it found
+# missing -- then reported every line of that category as new, on every pass,
+# forever. For these categories an empty reference can only have come from
+# that: every host has a root account, and an installed sshd, sudo or PAM always
+# has configuration. Categories that are legitimately empty (root's crontab,
+# authorized_keys, ld.so.preload, setuid) are never seeded this way, because
+# their first entry is exactly the finding.
+_BASELINE_NEVER_EMPTY="accounts sudoers sshd_config pam"
+
 # Sources we watch. Each becomes one file under state/baseline/.
 _baseline_capture() {
   local dst="$1"
@@ -114,12 +130,50 @@ _baseline_capture() {
 # review, or on first run.
 baseline_build() {
   _baseline_capture "$BASELINE_DIR"
+  _baseline_write_manifest
   # also seed the listener baseline used by detect_new_listener
   if command -v ss >/dev/null 2>&1; then
     ss -tlnH 2>/dev/null | awk '{print $4}' | sed 's/.*://' | sort -u \
       | grep -E '^[0-9]+$' > "$BASELINE_DIR/listeners" || true
   fi
   info "baseline rebuilt at $BASELINE_DIR"
+}
+
+_baseline_write_manifest() {
+  # shellcheck disable=SC2086  # one category per line, split on purpose
+  printf '%s\n' $BASELINE_CATEGORIES > "$BASELINE_DIR/.categories"
+}
+
+# _baseline_unrecorded <name> <curdir> <recorded> : true when the baseline never
+# captured this category, as opposed to captured it empty. <recorded> is the
+# manifest as " a b c ", or empty for a baseline that predates the manifest.
+_baseline_unrecorded() {
+  local name="$1" cur="$2" recorded="$3"
+  [ -f "$BASELINE_DIR/$name" ] || return 0
+  if [ -n "$recorded" ]; then
+    case "$recorded" in *" $name "*) return 1 ;; esac
+    return 0
+  fi
+  case " $_BASELINE_NEVER_EMPTY " in
+    *" $name "*) [ ! -s "$BASELINE_DIR/$name" ] && [ -s "$cur/$name" ] && return 0 ;;
+  esac
+  return 1
+}
+
+# _baseline_seed_category <name> <curdir> : take the current state of one
+# category as its reference. One event says so -- these lines were not diffed
+# against anything, and the operator should know that rather than assume it.
+_baseline_seed_category() {
+  local name="$1" cur="$2" n
+  n="$(grep -c . "$cur/$name" 2>/dev/null || true)"
+  if ! state_writable; then
+    log DRY "would record the current ${name} (${n:-0} entries) as its baseline"
+    return 1
+  fi
+  cp "$cur/$name" "$BASELINE_DIR/$name"
+  emit_event SOFT baseline_seeded "-" \
+    "no reference for ${name} yet (added after the baseline was taken): recorded the current ${n:-0} entries as the baseline, unreviewed"
+  return 0
 }
 
 # baseline_diff : print SOFT|persistence findings for every line that is present
@@ -140,17 +194,32 @@ baseline_diff() {
   local cur; cur="$(mktemp -d)"
   _baseline_capture "$cur"
 
+  local recorded="" seeded=0
+  [ -f "$BASELINE_DIR/.categories" ] && \
+    recorded=" $(tr '\n' ' ' < "$BASELINE_DIR/.categories") "
+
   local name
-  for name in crontab cron_system units units_running root_authorized_keys \
-              root_shell_rc ld_preload accounts sudoers sshd_config pam setuid; do
+  for name in $BASELINE_CATEGORIES; do
     [ -f "$cur/$name" ] || continue
-    [ -f "$BASELINE_DIR/$name" ] || touch "$BASELINE_DIR/$name"
+    # A category with no reference used to get an empty one, so every line of
+    # it read as new on every pass. Recording it once is the only answer that
+    # does not either flood the operator or silently diff against nothing.
+    if _baseline_unrecorded "$name" "$cur" "$recorded"; then
+      _baseline_seed_category "$name" "$cur" && seeded=1
+      continue
+    fi
     while IFS= read -r line; do
       [ -n "$line" ] || continue
       grep -qxF "$line" "$BASELINE_DIR/$name" || \
         echo "SOFT|persistence|-|new in ${name}: ${line}"
     done < <(comm -13 <(sort "$BASELINE_DIR/$name") <(sort "$cur/$name"))
   done
+
+  # Write the manifest once for a pre-manifest baseline, and again whenever a
+  # category was seeded. Every category is now either diffed or recorded.
+  if state_writable && { [ -z "$recorded" ] || [ "$seeded" = 1 ]; }; then
+    _baseline_write_manifest
+  fi
 
   rm -rf "$cur"
 }

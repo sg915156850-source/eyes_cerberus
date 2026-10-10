@@ -174,6 +174,116 @@ quarantine_restore() {
 }
 
 #---------------------------------------------------------------------------
+# Repeat suppression for SOFT findings.
+#
+# A SOFT finding is a question for the operator, and it stays true on every
+# pass until someone answers it -- re-baselines, whitelists, fixes the host.
+# Re-emitting it every SENSOR_INTERVAL turned a hundred unanswered questions
+# into ~50k identical events a day on a busy host: the log rotated real history
+# away in under two days, the evidence directory filled with copies of the same
+# snapshot, and any push backend would have been muted by its owner -- after
+# which a genuine finding goes unread.
+#
+# So a SOFT finding is reported when it first appears, again every
+# ALERT_REPEAT_SECONDS while it persists, and at once if it went away for
+# ALERT_FORGET_SECONDS and came back. HARD findings are never suppressed: each
+# one is acted on.
+#
+# The state is keyed by the finding's text. That text can carry an attacker's
+# argv, so keys are only ever used as associative-array subscripts in plain
+# expansions and assignments -- never inside (( )), [[ -v ]], unset or read,
+# where bash evaluates a subscript a second time.
+#---------------------------------------------------------------------------
+ALERT_STATE_FILE="$STATE_DIR/alert_state.tsv"
+declare -gA _ALERT_LAST=() _ALERT_SEEN=() _ALERT_FIRST=()
+_ALERT_NOW=0
+_ALERT_FORGET=0
+_ALERT_KEY=""
+_ALERT_SINCE=""
+_ALERT_OPEN=0
+
+# _alert_key <category> <detail> -> $_ALERT_KEY : what stays the same about a
+# finding from one pass to the next. PIDs and fds change whenever the same
+# service restarts, CPU figures on every sample.
+_alert_key() {
+  local rest="$1|$2" out=""
+  local re='(pid|fd)=[0-9]+|[0-9][0-9.]*%|over [0-9]+ samples'
+  while [[ $rest =~ $re ]]; do
+    out+="${rest%%"${BASH_REMATCH[0]}"*}#"
+    rest="${rest#*"${BASH_REMATCH[0]}"}"
+  done
+  out+="$rest"
+  _ALERT_KEY="${out//$'\t'/ }"
+}
+
+# _alert_clock : fix "now" and the forget window for this pass.
+_alert_clock() {
+  _ALERT_NOW="${CERBERUS_NOW:-${EPOCHSECONDS:-$(date +%s)}}"
+  # Never shorter than the slowest periodic detector, or a finding it reports
+  # every PERSISTENCE_EVERY passes would be forgotten in between and re-sent.
+  _ALERT_FORGET="${ALERT_FORGET_SECONDS:-3600}"
+  local floor=$(( 3 * ${SENSOR_INTERVAL:-30} * ${PERSISTENCE_EVERY:-10} ))
+  [ "$_ALERT_FORGET" -ge "$floor" ] 2>/dev/null || _ALERT_FORGET="$floor"
+}
+
+# alert_state_load : read what was reported before. Once per pass.
+alert_state_load() {
+  _ALERT_LAST=(); _ALERT_SEEN=(); _ALERT_FIRST=()
+  _alert_clock
+  [ -f "$ALERT_STATE_FILE" ] || return 0
+  local last seen first key
+  while IFS=$'\t' read -r last seen first key; do
+    [ -n "$key" ] || continue
+    _ALERT_LAST["$key"]="$last"
+    _ALERT_SEEN["$key"]="$seen"
+    _ALERT_FIRST["$key"]="$first"
+  done < "$ALERT_STATE_FILE"
+}
+
+# alert_state_save : keep what is still open, drop what has been gone long
+# enough to be forgotten. Sets $_ALERT_OPEN for the heartbeat.
+alert_state_save() {
+  [ "$_ALERT_NOW" -gt 0 ] || return 0
+  local key seen n=0
+  {
+    for key in "${!_ALERT_SEEN[@]}"; do
+      seen="${_ALERT_SEEN["$key"]}"
+      [ $(( _ALERT_NOW - seen )) -lt "$_ALERT_FORGET" ] || continue
+      printf '%s\t%s\t%s\t%s\n' "${_ALERT_LAST["$key"]:-0}" "$seen" \
+        "${_ALERT_FIRST["$key"]:-$seen}" "$key"
+      n=$(( n + 1 ))
+    done
+  } > "$ALERT_STATE_FILE.tmp" && mv -f "$ALERT_STATE_FILE.tmp" "$ALERT_STATE_FILE"
+  _ALERT_OPEN="$n"
+}
+
+# alert_should_report <severity> <category> <detail> : 0 = report it this time.
+# On a reminder, $_ALERT_SINCE holds when the finding was first reported.
+alert_should_report() {
+  local sev="$1" cat="$2" detail="$3"
+  _ALERT_SINCE=""
+  [ "$sev" = "HARD" ] && return 0
+  local repeat="${ALERT_REPEAT_SECONDS:-86400}"
+  [ "$repeat" -gt 0 ] 2>/dev/null || return 0      # 0 = every pass, as in v2.1.0
+  [ "$_ALERT_NOW" -gt 0 ] || _alert_clock
+
+  _alert_key "$cat" "$detail"
+  local key="$_ALERT_KEY"
+  local last="${_ALERT_LAST["$key"]:-}" seen="${_ALERT_SEEN["$key"]:-}"
+  _ALERT_SEEN["$key"]="$_ALERT_NOW"
+
+  if [ -n "$last" ] && [ -n "$seen" ] && [ $(( _ALERT_NOW - seen )) -lt "$_ALERT_FORGET" ]; then
+    # still open since the last pass
+    [ $(( _ALERT_NOW - last )) -ge "$repeat" ] || return 1
+    _ALERT_SINCE="${_ALERT_FIRST["$key"]:-$last}"
+  else
+    _ALERT_FIRST["$key"]="$_ALERT_NOW"
+  fi
+  _ALERT_LAST["$key"]="$_ALERT_NOW"
+  return 0
+}
+
+#---------------------------------------------------------------------------
 # handle_finding "SEVERITY|CATEGORY|PID|DETAIL"
 #---------------------------------------------------------------------------
 handle_finding() {
@@ -181,6 +291,14 @@ handle_finding() {
   local sev cat pid detail
   IFS='|' read -r sev cat pid detail <<< "$line"
   [ -n "${sev:-}" ] || return 0
+
+  # ---- already reported and still open: nothing new to say ----
+  # Before forensics too: a snapshot per pass of the same process is the same
+  # evidence a thousand times over.
+  alert_should_report "$sev" "$cat" "$detail" || return 0
+  if [ -n "$_ALERT_SINCE" ]; then
+    detail="$detail (still open, first reported $(date -d "@$_ALERT_SINCE" -Iseconds 2>/dev/null || echo "$_ALERT_SINCE"))"
+  fi
 
   # ---- forensics first, always ----
   local ev=""

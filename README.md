@@ -11,7 +11,7 @@ tiers: high-confidence signatures are auto-contained, heuristics only alert.
 
 ## Status
 
-- **v2.1** — installable on any host (`install.sh` or a `.deb`), 141 tests in
+- **v2.1** — installable on any host (`install.sh` or a `.deb`), 160 tests in
   CI across Debian 12, Ubuntu 24.04 and AlmaLinux 9, and detectors that are not
   tied to one machine's incident. See `CHANGELOG.md` and `ROADMAP.md`.
 - **v2.0** — the rewrite into a single supervised daemon. The v1 layout had
@@ -288,6 +288,7 @@ Run it from cron if you want it current:
 | `DRY_RUN` | `0` | `1` = never kill/chmod/iptables, only log with `[DRY]` |
 | `NOTIFY_METHOD` | `log` | `log` \| `telegram` \| `webhook` \| `email` (+ `TG_TOKEN`/`TG_CHAT`, `WEBHOOK_URL`, `EMAIL_TO`) |
 | `NOTIFY_MIN_SEVERITY` | `SOFT` | `HARD` to mute SOFT notifications (still recorded in `events.jsonl`) |
+| `ALERT_REPEAT_SECONDS` / `ALERT_FORGET_SECONDS` | `86400` / `3600` | a SOFT finding still open is reported once, then once per repeat window; gone longer than the forget window and back = reported at once. `0` repeat = every pass. HARD is never held back |
 | `DETECT_HIGH_CPU` / `DETECT_NEW_LISTENER` / `DETECT_PERSISTENCE` / `DETECT_UPX_NEW` | `1` | toggle individual SOFT detectors |
 | `DETECT_REVSHELL` / `DETECT_FILELESS` / `DETECT_SETUID` / `DETECT_LOADER` | `1` | toggle the generic detectors |
 | `SETUID_DIRS` | `/tmp /var/tmp /dev/shm /home /root /opt /srv /usr/local` | where a new setuid file is worth reporting (not `/usr/bin`: that is package upgrades) |

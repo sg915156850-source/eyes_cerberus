@@ -130,6 +130,8 @@ EOF
   [ ! -f "$CERBERUS_STATE_DIR/seen_loaders" ]
   [ ! -f "$CERBERUS_STATE_DIR/.hashscan_marker" ]
   [ ! -f "$CERBERUS_STATE_DIR/.upxscan_marker" ]
+  [ ! -f "$CERBERUS_STATE_DIR/baseline/.categories" ]
+  [ ! -f "$CERBERUS_STATE_DIR/alert_state.tsv" ]
 }
 
 @test "a real scan does seed it" {

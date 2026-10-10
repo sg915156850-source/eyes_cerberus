@@ -1,5 +1,40 @@
 # Changelog
 
+## 2.1.1 — 2026-10-10
+
+A week of a live v2.1.0 daemon on a busy multi-project host: ~390 000 events,
+not one of them HARD, all of them the same ~110 findings repeated every 30
+seconds. The log rotated real history away in under two days, and a push
+backend would have been muted by its owner long before anything real arrived.
+
+### Fixed
+- **Categories added after the baseline was taken were reported in full on
+  every pass, forever.** v2.1.0 added `accounts`, `sudoers`, `sshd_config`,
+  `pam` and `setuid` to the persistence snapshot. On a host whose baseline came
+  from v2.0, `baseline_diff` created an empty reference for each and never
+  filled it, so every account, every PAM file and every sshd directive read as
+  "new" on every pass. `baseline_build` now writes `baseline/.categories`; a
+  category the baseline never captured is recorded once from the current state,
+  with one `baseline_seeded` event saying it was not diffed. Pre-manifest
+  baselines are migrated: an empty `accounts`/`sudoers`/`sshd_config`/`pam`
+  reference is taken as never captured (no host has none of those), while an
+  empty crontab, `authorized_keys`, `ld.so.preload` or `setuid` is not -- a
+  first entry there is exactly the finding.
+- The same code path `touch`ed the missing reference even under a dry run.
+
+### Changed
+- **A SOFT finding that stays open is reported once, not every pass.** It is
+  reported when it first appears, again every `ALERT_REPEAT_SECONDS` (default
+  one day) while it stays open with "still open, first reported ...", and at
+  once if it was gone for `ALERT_FORGET_SECONDS` (default one hour, never less
+  than three persistence cycles) and came back. PIDs, fds and CPU figures are
+  not part of a finding's identity, so a restarted service or a fluctuating
+  load is the same finding. A held-back finding takes no fresh forensics
+  snapshot either. HARD findings are never held back.
+  `ALERT_REPEAT_SECONDS=0` restores the v2.1.0 behaviour. State lives in
+  `alert_state.tsv`; `dryscan` neither reads nor writes it.
+- The hourly heartbeat reports how many findings are open.
+
 ## 2.1.0 — 2026-09-06
 
 v2.0 was one host's tool: the install path was baked into the systemd unit,

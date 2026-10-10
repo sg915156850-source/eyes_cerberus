@@ -38,7 +38,7 @@ source "$_dir/lib/sigupdate.sh"
 # shellcheck source=lib/report.sh
 source "$_dir/lib/report.sh"
 
-VERSION="2.1.0"
+VERSION="2.1.1"
 
 one_pass() {
   local act="$1"   # act | noact
@@ -46,8 +46,13 @@ one_pass() {
   findings="$(run_all_detectors)"
   if [ -z "$findings" ]; then
     [ "$act" = "noact" ] && echo "(no findings)"
+    # an empty pass still ages out what has gone away
+    [ "$act" = "act" ] && { alert_state_load; alert_state_save; }
     return 0
   fi
+  # What was already reported, so a finding still open from the last pass is
+  # not reported again (lib/respond.sh). A dry run neither reads nor advances it.
+  [ "$act" = "act" ] && alert_state_load
   local line
   while IFS= read -r line; do
     [ -n "$line" ] || continue
@@ -58,6 +63,8 @@ one_pass() {
       handle_finding "$line"
     fi
   done <<< "$findings"
+  [ "$act" = "act" ] && alert_state_save
+  return 0
 }
 
 cmd_run() {
@@ -90,7 +97,7 @@ cmd_run() {
     CERBERUS_PASS=$(( CERBERUS_PASS + 1 ))
     if [ $(( CERBERUS_PASS % hb_every )) -eq 0 ]; then
       local ev=0; [ -f "$EVENTS_LOG" ] && ev="$(wc -l < "$EVENTS_LOG" | tr -d ' ')"
-      info "heartbeat: ${CERBERUS_PASS} passes, ${ev} events total"
+      info "heartbeat: ${CERBERUS_PASS} passes, ${ev} events total, ${_ALERT_OPEN} findings open"
     fi
     sleep "$SENSOR_INTERVAL" &
     wait $!
