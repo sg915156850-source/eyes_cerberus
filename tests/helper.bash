@@ -41,6 +41,8 @@ cerberus_load() {
   source "$REPO_ROOT/lib/sigupdate.sh"
   # shellcheck source=../lib/report.sh
   source "$REPO_ROOT/lib/report.sh"
+  # shellcheck source=../lib/sshharden.sh
+  source "$REPO_ROOT/lib/sshharden.sh"
 }
 
 # sig <file> <line>... : write a signature file the daemon will read.

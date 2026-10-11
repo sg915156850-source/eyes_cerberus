@@ -16,6 +16,7 @@ SUDOERS_DIR="${SUDOERS_DIR:-/etc/sudoers.d}"
 SSHD_CONFIG="${SSHD_CONFIG:-/etc/ssh/sshd_config}"
 SSHD_CONFIG_DIR="${SSHD_CONFIG_DIR:-/etc/ssh/sshd_config.d}"
 PAM_DIR="${PAM_DIR:-/etc/pam.d}"
+ROOT_AUTHORIZED_KEYS="${ROOT_AUTHORIZED_KEYS:-/root/.ssh/authorized_keys}"
 
 # Where a newly-appeared setuid binary is worth knowing about. Deliberately not
 # the whole filesystem: a full find(1) every cycle is too expensive, and new
@@ -60,7 +61,7 @@ _baseline_capture() {
   systemctl list-units --type=service --state=running --no-legend --no-pager 2>/dev/null \
     | awk '{print $1}' | sort > "$dst/units_running" || true
 
-  cat /root/.ssh/authorized_keys 2>/dev/null | sort > "$dst/root_authorized_keys" || true
+  sort "$ROOT_AUTHORIZED_KEYS" 2>/dev/null > "$dst/root_authorized_keys" || true
 
   for f in /root/.bashrc /root/.profile /root/.bash_profile; do
     [ -f "$f" ] && sha256sum "$f" 2>/dev/null
@@ -174,6 +175,26 @@ _baseline_seed_category() {
   emit_event SOFT baseline_seeded "-" \
     "no reference for ${name} yet (added after the baseline was taken): recorded the current ${n:-0} entries as the baseline, unreviewed"
   return 0
+}
+
+# baseline_accept_category <name> <why> : take the current state of one category
+# as its reference, after a change this tool made itself (cerberus.sh ssh). The
+# rest of the baseline is left alone: whatever else changed stays a finding.
+baseline_accept_category() {
+  local name="$1" why="$2" cur
+  [ -f "$BASELINE_DIR/units" ] || return 0   # no baseline yet: the first pass takes one
+  if ! state_writable; then
+    log DRY "would accept the current ${name} into the baseline: $why"
+    return 0
+  fi
+  cur="$(mktemp -d)" || return 1
+  # the setuid walk is the slow part of a capture and not needed for this
+  DETECT_SETUID=0 _baseline_capture "$cur"
+  if [ -f "$cur/$name" ]; then
+    cp "$cur/$name" "$BASELINE_DIR/$name"
+    emit_event SOFT accepted "-" "${name} taken into the baseline: $why"
+  fi
+  rm -rf "$cur"
 }
 
 # baseline_diff : print SOFT|persistence findings for every line that is present

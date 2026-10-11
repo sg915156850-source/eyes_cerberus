@@ -1,4 +1,4 @@
-# 👁️ Eyes Cerberus
+# Eyes Cerberus
 
 **Host defense daemon for a single Linux server.** One supervised process that
 watches for the malware family seen on this box in the March–April 2026 incident
@@ -11,6 +11,9 @@ tiers: high-confidence signatures are auto-contained, heuristics only alert.
 
 ## Status
 
+- **Unreleased (2.2)** — `cerberus.sh ssh`: take sshd off port 22 and root off
+  passwords, with every step rolling back by itself unless confirmed from a new
+  key session. First part of phase 12 in `ROADMAP.md` (the perimeter).
 - **v2.1** — installable on any host (`install.sh` or a `.deb`), 160 tests in
   CI across Debian 12, Ubuntu 24.04 and AlmaLinux 9, and detectors that are not
   tied to one machine's incident. See `CHANGELOG.md` and `ROADMAP.md`.
@@ -274,6 +277,54 @@ Run it from cron if you want it current:
 ```cron
 17 4 * * *  /opt/eyes-cerberus/cerberus.sh update-sigs
 ```
+
+### Taking sshd off port 22 without locking yourself out
+
+`cerberus.sh ssh` is the one part of Eyes Cerberus that changes how you reach
+the host, so it is built around one rule: nothing is taken away until a new
+session has proven that the replacement works, and an unconfirmed change undoes
+itself.
+
+```bash
+# on your own computer: the private key never leaves it
+ssh-keygen -t ed25519 -f ~/.ssh/myserver
+scp ~/.ssh/myserver.pub root@server:/root/      # or paste it into `add-key -`
+
+# on the server
+cerberus.sh ssh add-key /root/myserver.pub
+cerberus.sh ssh stage 2222      # listens on 22 AND 2222, rollback armed
+# from your computer, a NEW session:  ssh -p 2222 -i ~/.ssh/myserver root@server
+cerberus.sh ssh confirm         # in that session: rollback disarmed
+cerberus.sh ssh lock            # 2222 only, root by key only, rollback armed
+# another NEW session on 2222, and in it:
+cerberus.sh ssh confirm
+cerberus.sh ssh status
+```
+
+- `stage` and `lock` arm a transient systemd timer
+  (`eyes-cerberus-ssh-rollback.timer`) **before** touching sshd. If nobody
+  confirms within `SSH_CONFIRM_SECONDS` (15 minutes), it restores the previous
+  step and records a HARD `ssh_rollback` event. No `systemd-run`, no change.
+- `confirm` only works from a session that came in on the new port **and**
+  logged in with a key, read from sshd's own `Accepted publickey ...` line. A
+  session on the old port, or one that used a password, proves nothing.
+- Changes go into `/etc/ssh/sshd_config.d/01-eyes-cerberus.conf`, named to sort
+  first: sshd keeps the first value it reads, and cloud images ship
+  `50-cloud-init.conf` with `PasswordAuthentication yes`. Before applying,
+  `sshd -T` is asked what it will actually do; if another file still wins,
+  nothing is changed.
+- On Ubuntu 22.10+ the ports live in `ssh.socket`; `stage`/`lock` run
+  `daemon-reload` and restart the socket. Open sessions survive
+  (`KillMode=process`). Elsewhere sshd is reloaded.
+- fail2ban's `sshd` jail is pointed at the new port through
+  `/etc/fail2ban/jail.d/eyes-cerberus-ssh.local`.
+- `lock` stops root password logins (`PermitRootLogin prohibit-password`);
+  `lock --all-users` stops password logins for everyone.
+- `rollback` with no flag undoes all of it. A firewall at your hosting provider
+  is invisible from the host: if it blocks the new port, the new session does
+  not connect, and the change rolls itself back.
+- Afterwards, update `~/.ssh/config` on your side (`Port`, `IdentityFile`) and
+  anything else that connects, VS Code Remote-SSH included.
 
 ### Configuration (`etc/cerberus.env`)
 

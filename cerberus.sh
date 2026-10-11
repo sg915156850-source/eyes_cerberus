@@ -10,6 +10,9 @@
 #                       Review contained files, or undo a containment.
 #   cerberus.sh update-sigs [--dry-run]
 #                       Fetch a verified signature bundle.
+#   cerberus.sh ssh {status|add-key|stage|confirm|lock|rollback}
+#                       Move sshd off port 22, keys only for root, with an
+#                       automatic rollback unless confirmed (lib/sshharden.sh).
 #
 # Design notes:
 #   * No `set -e`. A detector that exits non-zero (e.g. grep with no match) must
@@ -37,6 +40,8 @@ source "$_dir/lib/respond.sh"
 source "$_dir/lib/sigupdate.sh"
 # shellcheck source=lib/report.sh
 source "$_dir/lib/report.sh"
+# shellcheck source=lib/sshharden.sh
+source "$_dir/lib/sshharden.sh"
 
 VERSION="2.1.1"
 
@@ -147,6 +152,7 @@ case "${1:-run}" in
   quarantine) shift; cmd_quarantine "$@" ;;
   update-sigs) shift; sig_update "$@" ;;
   report) shift; report "${1:-7}" "${2:-html}" ;;
+  ssh) shift; cmd_ssh "$@" ;;
   version|-v|--version) echo "eyes-cerberus $VERSION" ;;
   *)
     cat <<EOF
@@ -163,6 +169,9 @@ Usage: $0 {run|scan|dryscan|baseline|version}
             fetch and verify a signature bundle (SIGNATURE_URL/SIGNATURE_SHA256)
   report [days] [html|json]
             period report over events.jsonl, on stdout
+  ssh status | add-key <file.pub|-> | stage <port> | confirm | lock [--all-users] | rollback
+            take sshd off port 22 and root off passwords; every step rolls
+            back by itself unless confirmed from a new key session
 EOF
     exit 1 ;;
 esac

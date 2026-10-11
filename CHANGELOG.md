@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+The host this grew up on takes about 3 500 failed SSH logins a day from ~200
+addresses, root still logs in with a password, and fail2ban's 5-in-10-minutes
+threshold misses the slow, spread-out attempts that make up most of them. Phase
+12 starts with the change that removes the actual risk.
+
+### Added
+- **`cerberus.sh ssh`**: `add-key`, `stage <port>`, `confirm`, `lock
+  [--all-users]`, `rollback`, `status`. Moves sshd off port 22 and root off
+  passwords in two confirmed steps. Every step that changes sshd arms a
+  systemd timer first and restores the previous step unless `confirm` is run
+  from a new session that logged in with a key on the new port. Checked against
+  `sshd -T` before applying; socket-activated sshd (Ubuntu 22.10+) is handled;
+  fail2ban's `sshd` jail follows the port. Verified end to end against a real
+  systemd + socket-activated OpenSSH 9.6 (Ubuntu 24.04): open sessions survive,
+  root password logins are refused after `lock`, and an unconfirmed `stage` or
+  `lock` is undone by the timer.
+- `baseline_accept_category`: a change made by Eyes Cerberus itself (a key, the
+  sshd drop-in) is taken into that one baseline category with an `accepted`
+  event, instead of coming back as a `persistence` finding.
+
+### Changed
+- The `root_authorized_keys` baseline category reads `ROOT_AUTHORIZED_KEYS`
+  (default `/root/.ssh/authorized_keys`), so tests no longer read the real file.
+
 ## 2.1.1 — 2026-10-10
 
 A week of a live v2.1.0 daemon on a busy multi-project host: ~390 000 events,
