@@ -1,13 +1,50 @@
 # Changelog
 
-## Unreleased
+## 2.1.2 — 2026-10-12
+
+The first install on a second host, from a clean checkout with `install.sh`,
+turned up two defects that the first host had hidden, and a handful of places
+where the documentation promised more than the code does. It also carries
+the opt-in `cerberus.sh ssh` work that sat under Unreleased.
+
+### Fixed
+- **`cerberus status` said "unit not installed" for a running daemon, on
+  about every other call.** `have_unit` was `systemctl list-unit-files | grep
+  -q`: grep exits on the first match, systemctl gets SIGPIPE writing the rest,
+  and under `pipefail` the pipeline reports 141. The same false negative made
+  `cerberus start` run `cerberus.sh run` in the foreground instead of asking
+  systemd. The listing is now read whole, then matched.
+- The same `producer | grep -q` shape, in every other place it occurred:
+  `is_whitelisted` (a hit near the top of a long `whitelist.txt` read as a
+  miss), the port and firewall probes of `cerberus.sh ssh`, the per-process
+  argv checks of `c2`, `miner` and `loader`, the digest check of
+  `update-sigs`, and `ir/docker/containment.sh`. A test now fails if the
+  pattern comes back.
+- **Upgrading the `.deb` with `dpkg -i` left the daemon stopped and
+  disabled.** `prerm` ran `systemctl disable --now` whatever it was called
+  for. It now follows Debian policy: `remove` stops and disables, `upgrade`
+  only stops, and `postinst` starts the new code again when the unit is
+  enabled. A first install still starts nothing. dpkg runs the *old*
+  package's `prerm`, so the upgrade from 2.1.1 itself still ends disabled;
+  `postinst` says so, and `systemctl enable --now eyes-cerberus.service` once
+  after it is needed.
+- **`high_cpu` and `miner` never saw a process with a space in its name**
+  (`npm exec vite p`, `tmux: server`). `ps -o pid,comm,pcpu` was split on
+  whitespace, so a word of the name was read as the CPU figure, and such a
+  process never made the CPU shortlist: a CPU-hot miner with a spaced name was
+  only ever SOFT. `pcpu` now comes before `comm`, and `comm` is the rest of the
+  line.
+- `whitelist.txt` stripped every space from an entry, so a name with a space
+  in it could never be whitelisted. Entries are now trimmed only at the ends.
+
+### Added
 
 The host this grew up on takes about 3 500 failed SSH logins a day from ~200
 addresses, root still logs in with a password, and fail2ban's 5-in-10-minutes
 threshold misses the slow, spread-out attempts that make up most of them. Phase
-12 starts with the change that removes the actual risk.
+12 starts with the change that removes the actual risk. Opt-in: nothing below
+runs until `cerberus.sh ssh` is invoked.
 
-### Added
 - **`cerberus.sh ssh`**: `add-key`, `stage <port>`, `confirm`, `lock
   [--all-users]`, `rollback`, `status`. Moves sshd off port 22 and root off
   passwords in two confirmed steps. Every step that changes sshd arms a
@@ -23,6 +60,14 @@ threshold misses the slow, spread-out attempts that make up most of them. Phase
   event, instead of coming back as a `persistence` finding.
 
 ### Changed
+- The `whitelist.txt` header said it exempted processes from the "CPU/miner
+  heuristics". `miner` has never read it, deliberately: a whitelisted name
+  would be the cheapest disguise for a miner. The header and the README now
+  say `high_cpu` only.
+- The README listed an `egress` detector and a `DETECT_EGRESS` switch that
+  were never implemented. Both are gone from the README, `cerberus.env.example`
+  and the defaults; a leftover `DETECT_EGRESS=` line in an existing
+  `cerberus.env` is harmless.
 - The `root_authorized_keys` baseline category reads `ROOT_AUTHORIZED_KEYS`
   (default `/root/.ssh/authorized_keys`), so tests no longer read the real file.
 

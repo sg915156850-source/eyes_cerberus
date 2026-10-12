@@ -11,10 +11,14 @@ tiers: high-confidence signatures are auto-contained, heuristics only alert.
 
 ## Status
 
-- **Unreleased (2.2)** — `cerberus.sh ssh`: take sshd off port 22 and root off
-  passwords, with every step rolling back by itself unless confirmed from a new
-  key session. First part of phase 12 in `ROADMAP.md` (the perimeter).
-- **v2.1** — installable on any host (`install.sh` or a `.deb`), 160 tests in
+- **v2.1.2** — fixes from the first install on a second host: `cerberus
+  status` reporting a running daemon's unit as not installed, a `.deb` upgrade
+  leaving the daemon disabled, CPU checks missing processes with a space in
+  their name. Also ships `cerberus.sh ssh` (opt-in, does nothing until run):
+  take sshd off port 22 and root off passwords, with every step rolling back by
+  itself unless confirmed from a new key session. First part of phase 12 in
+  `ROADMAP.md` (the perimeter).
+- **v2.1** — installable on any host (`install.sh` or a `.deb`), 210 tests in
   CI across Debian 12, Ubuntu 24.04 and AlmaLinux 9, and detectors that are not
   tied to one machine's incident. See `CHANGELOG.md` and `ROADMAP.md`.
 - **v2.0** — the rewrite into a single supervised daemon. The v1 layout had
