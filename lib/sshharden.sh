@@ -174,7 +174,7 @@ _ssh_valid_port() {
 # SIGPIPE, after grep -q has already matched and exited, turns a match into 141.
 _ssh_listening() {
   local ports
-  ports="$(ss -tlnH 2>/dev/null | awk '{print $4}')"
+  ports="$(ss -tlnH 2>/dev/null | awk '{print $4}')" || true
   grep -qE "[:.]$1\$" <<<"$ports"
 }
 
@@ -217,14 +217,14 @@ _ssh_reload_f2b() {
 _ssh_firewall_warn() {
   local port="$1" rules
   if command -v iptables >/dev/null 2>&1; then
-    rules="$(iptables -S INPUT 2>/dev/null)"
+    rules="$(iptables -S INPUT 2>/dev/null)" || true
     if grep -qE '^-P INPUT (DROP|REJECT)' <<<"$rules" && \
        ! grep -qE -- "--dport $port( |$)" <<<"$rules"; then
       warn "INPUT policy drops by default and no rule opens port $port -- open it first"
     fi
   fi
   if command -v ufw >/dev/null 2>&1; then
-    rules="$(ufw status 2>/dev/null)"
+    rules="$(ufw status 2>/dev/null)" || true   # not root, or not set up: no output
     if grep -q '^Status: active' <<<"$rules"; then
       grep -qE "^$port(/tcp)? " <<<"$rules" || \
         warn "ufw is active and has no rule for $port -- run: ufw allow $port/tcp"
