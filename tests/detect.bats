@@ -115,7 +115,7 @@ teardown() {
   SPAWNED="$(spawn_idle)"
   sig miner_patterns.txt "xmrig"
   fixture ps_args "  $SPAWNED xmrig --url pool.example:3333"
-  fixture ps_cpu  "$SPAWNED xmrig 90.0"
+  fixture ps_cpu  "$SPAWNED 90.0 xmrig"
 
   run detect_miner
   [[ "$output" == "SOFT|miner|$SPAWNED|"* ]]
@@ -126,8 +126,21 @@ teardown() {
   SPAWNED="$(spawn_busy)"
   sig miner_patterns.txt "xmrig"
   fixture ps_args "  $SPAWNED xmrig --url pool.example:3333"
-  fixture ps_cpu  "$SPAWNED xmrig 99.0"
+  fixture ps_cpu  "$SPAWNED 99.0 xmrig"
   CPU_THRESHOLD=1     # the process is real, so its /proc stat really does move
+
+  run detect_miner
+  [[ "$output" == "HARD|miner|$SPAWNED|"* ]]
+}
+
+@test "miner: a CPU-hot miner with a space in its name is HARD" {
+  # It used to miss the CPU shortlist (see high_cpu below) and so was only
+  # ever SOFT, whatever its load.
+  SPAWNED="$(spawn_busy)"
+  sig miner_patterns.txt "xmrig"
+  fixture ps_args "  $SPAWNED xmrig --url pool.example:3333"
+  fixture ps_cpu  "$SPAWNED 99.0 kswapd 0"
+  CPU_THRESHOLD=1
 
   run detect_miner
   [[ "$output" == "HARD|miner|$SPAWNED|"* ]]
@@ -144,7 +157,7 @@ teardown() {
 
 @test "high_cpu: reports only after CPU_SUSTAIN_SAMPLES consecutive passes" {
   SPAWNED="$(spawn_busy)"
-  fixture ps_cpu "$SPAWNED burner 99.0"
+  fixture ps_cpu "$SPAWNED 99.0 burner"
   fixture ps_p   "burner burner --spin"
   CPU_THRESHOLD=1
   CPU_SUSTAIN_SAMPLES=3
@@ -162,7 +175,38 @@ teardown() {
 @test "high_cpu: a whitelisted process is never reported" {
   SPAWNED="$(spawn_busy)"
   printf 'burner\n' > "$CERBERUS_CONF_DIR/whitelist.txt"
-  fixture ps_cpu "$SPAWNED burner 99.0"
+  fixture ps_cpu "$SPAWNED 99.0 burner"
+  CPU_THRESHOLD=1
+  CPU_SUSTAIN_SAMPLES=1
+
+  run detect_high_cpu
+  [ -z "$output" ]
+}
+
+@test "high_cpu: ps is asked for pcpu before comm" {
+  # comm can contain spaces, so it has to be the last column: anything after
+  # it cannot be found by splitting on whitespace.
+  fixture ps_cpu ""
+  run detect_high_cpu
+  [[ "$(calls ps)" == *"pid=,pcpu=,comm="* ]]
+}
+
+@test "high_cpu: a process with a space in its name is measured" {
+  # With comm in the middle, "PID tmux: server 99.0" read pcpu as "server",
+  # i.e. 0, and the process never reached the shortlist.
+  SPAWNED="$(spawn_busy)"
+  fixture ps_cpu "$SPAWNED 99.0 tmux: server"
+  CPU_THRESHOLD=1
+  CPU_SUSTAIN_SAMPLES=1
+
+  run detect_high_cpu
+  [[ "$output" == "SOFT|high_cpu|$SPAWNED|"* ]]
+}
+
+@test "high_cpu: a whitelisted name with a space in it is honoured" {
+  SPAWNED="$(spawn_busy)"
+  printf 'tmux: server\n' > "$CERBERUS_CONF_DIR/whitelist.txt"
+  fixture ps_cpu "$SPAWNED 99.0 tmux: server"
   CPU_THRESHOLD=1
   CPU_SUSTAIN_SAMPLES=1
 
@@ -172,7 +216,7 @@ teardown() {
 
 @test "high_cpu: disabled by DETECT_HIGH_CPU=0" {
   SPAWNED="$(spawn_busy)"
-  fixture ps_cpu "$SPAWNED burner 99.0"
+  fixture ps_cpu "$SPAWNED 99.0 burner"
   CPU_THRESHOLD=1
   CPU_SUSTAIN_SAMPLES=1
   DETECT_HIGH_CPU=0
@@ -245,7 +289,7 @@ teardown() {
   # The counter used to be keyed by pid alone, so a new process landing on a
   # recycled pid inherited the CPU history of the one before it.
   SPAWNED="$(spawn_busy)"
-  fixture ps_cpu "$SPAWNED burner 99.0"
+  fixture ps_cpu "$SPAWNED 99.0 burner"
   CPU_THRESHOLD=1
   CPU_SUSTAIN_SAMPLES=2
 
@@ -467,7 +511,7 @@ teardown() {
 
 @test "dry run: the CPU sustain counter does not advance" {
   SPAWNED="$(spawn_busy)"
-  fixture ps_cpu "$SPAWNED burner 99.0"
+  fixture ps_cpu "$SPAWNED 99.0 burner"
   CPU_THRESHOLD=1
   CPU_SUSTAIN_SAMPLES=2
   DRY_RUN=1

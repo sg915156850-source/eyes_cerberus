@@ -49,6 +49,21 @@ _proc_starttime() {
   printf '%s' "${fields[19]:-0}"
 }
 
+# _ps_cpu_over <threshold> <divisor> : "pid comm" for every process whose
+# lifetime CPU average is over threshold/divisor, busiest first. pcpu comes
+# before comm because comm is chosen by the process and may contain spaces
+# ("tmux: server", "Web Content"): with comm in the middle, splitting on
+# whitespace read a word of the name as the CPU figure, and such a process
+# never made the shortlist at all.
+_ps_cpu_over() {
+  ps -eo pid=,pcpu=,comm= --sort=-pcpu 2>/dev/null | awk -v t="$1" -v d="$2" '
+    $2+0 > t/d {
+      pid = $1
+      sub(/^ *[^ ]+ +[^ ]+ +/, "")
+      print pid, $0
+    }'
+}
+
 #---------------------------------------------------------------------------
 # Instantaneous CPU for a batch of PIDs (per-core %, may exceed 100).
 # Usage: inst_cpu_batch pid1 pid2 ...  -> prints "pid cpu" lines
@@ -318,7 +333,7 @@ detect_miner() {
   # shortlist offenders by lifetime CPU so the instantaneous check stays cheap
   while read -r pid comm; do
     [[ "$pid" =~ ^[0-9]+$ ]] && hot+=("$pid")
-  done < <(ps -eo pid=,comm=,pcpu= --sort=-pcpu 2>/dev/null | awk -v t="$CPU_THRESHOLD" '$3+0 > t/3 {print $1, $2}')
+  done < <(_ps_cpu_over "$CPU_THRESHOLD" 3)
 
   declare -A inst=()
   if [ "${#hot[@]}" -gt 0 ]; then
@@ -350,7 +365,7 @@ detect_high_cpu() {
     [[ "$pid" =~ ^[0-9]+$ ]] || continue
     is_whitelisted "$comm" && continue
     cand+=("$pid")
-  done < <(ps -eo pid=,comm=,pcpu= --sort=-pcpu 2>/dev/null | awk -v t="$CPU_THRESHOLD" '$3+0 > t/2 {print $1, $2}')
+  done < <(_ps_cpu_over "$CPU_THRESHOLD" 2)
 
   declare -A now=()
   if [ "${#cand[@]}" -gt 0 ]; then

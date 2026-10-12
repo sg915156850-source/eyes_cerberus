@@ -232,6 +232,18 @@ here'
   done
 }
 
+@test "is_whitelisted: a name with a space in it can be whitelisted" {
+  # comm is chosen by the process and may contain spaces; stripping every
+  # space from the list made such an entry match nothing.
+  printf '  tmux: server   # terminal multiplexer\npg_dump\n' > "$CERBERUS_CONF_DIR/whitelist.txt"
+  run is_whitelisted "tmux: server"
+  [ "$status" -eq 0 ]
+  run is_whitelisted "tmux:server"
+  [ "$status" -ne 0 ]
+  run is_whitelisted "-bash"           # a login shell's comm; not an option
+  [ "$status" -ne 0 ]
+}
+
 @test "no pipeline in the shipped code ends in grep -q" {
   # Under pipefail, `producer | grep -q` fails whenever grep matches before the
   # producer has finished writing: the producer gets SIGPIPE and the pipeline
