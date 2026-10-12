@@ -32,7 +32,15 @@ say_ok()   { echo "${GRN}[+]${NC} $*"; }
 say_warn() { echo "${YEL}[!]${NC} $*"; }
 say_bad()  { echo "${RED}[-]${NC} $*"; }
 
-have_unit() { systemctl list-unit-files 2>/dev/null | grep -q "^${UNIT}"; }
+# Not `systemctl list-unit-files | grep -q`: grep -q exits on the first match
+# while systemctl is still writing, systemctl dies of SIGPIPE, and under
+# pipefail the pipeline reports 141 -- "unit not installed" for a running
+# daemon, on roughly every other call. Read the whole listing, then match.
+have_unit() {
+  local units
+  units="$(systemctl list-unit-files 2>/dev/null)" || true
+  grep -q "^${UNIT}" <<<"$units"
+}
 
 cmd_status() {
   echo "=== Eyes Cerberus status ==="

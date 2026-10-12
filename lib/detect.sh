@@ -227,16 +227,16 @@ detect_c2() {
   local pid args ip port
   while read -r pid args; do
     [[ "$pid" =~ ^[0-9]+$ ]] || continue
-    echo "$args" | grep -qE '(^|/)(nc|ncat|netcat|socat)([[:space:]]|$)' || continue
+    grep -qE '(^|/)(nc|ncat|netcat|socat)([[:space:]]|$)' <<<"$args" || continue
     for ip in "${c2_ips[@]}"; do
       [ -n "$ip" ] || continue
-      if echo "$args" | grep -qF "$ip"; then
+      if grep -qF -- "$ip" <<<"$args"; then
         echo "HARD|c2_beacon|$pid|$(echo "$args" | tr -s ' ') -> C2 $ip"
       fi
     done
     for port in "${c2_ports[@]}"; do
       [ -n "$port" ] || continue
-      if echo "$args" | grep -qE "[[:space:]]${port}([[:space:]]|$)"; then
+      if grep -qE "[[:space:]]${port}([[:space:]]|$)" <<<"$args"; then
         echo "HARD|c2_beacon|$pid|$(echo "$args" | tr -s ' ') -> suspicious port $port"
       fi
     done
@@ -327,7 +327,7 @@ detect_miner() {
 
   while read -r pid args; do
     [[ "$pid" =~ ^[0-9]+$ ]] || continue
-    echo "$args" | grep -qiE "$pat" || continue
+    grep -qiE -- "$pat" <<<"$args" || continue
     local c="${inst[$pid]:-0}"
     if awk -v v="$c" -v t="$CPU_THRESHOLD" 'BEGIN{exit !(v+0>t)}'; then
       echo "HARD|miner|$pid|$(echo "$args" | tr -s ' ') cpu=${c}%"
@@ -463,7 +463,7 @@ detect_loader() {
     [ -n "$line" ] || continue
     where="${line%%$'\t'*}"
     line="${line#*$'\t'}"
-    echo "$line" | grep -qiE "$pat" || continue
+    grep -qiE -- "$pat" <<<"$line" || continue
 
     key="$(printf '%s|%s' "$where" "$line" | sha256sum | cut -d' ' -f1)"
     if [ -f "$LOADER_SEEN_FILE" ] && grep -qxF "$key" "$LOADER_SEEN_FILE"; then

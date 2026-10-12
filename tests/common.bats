@@ -219,3 +219,31 @@ here'
   run check_config_perms
   [ "$status" -eq 0 ]
 }
+
+@test "is_whitelisted: a hit near the top of a long whitelist is still a hit" {
+  # sed | grep -q under pipefail: grep exits on the match, sed dies of SIGPIPE
+  # writing the rest, and the pipeline's 141 turned the hit into a miss.
+  { echo pg_dump; for i in $(seq 1 20000); do echo "filler-process-$i"; done; } \
+    > "$CERBERUS_CONF_DIR/whitelist.txt"
+  local i
+  for i in 1 2 3; do
+    run is_whitelisted pg_dump
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "no pipeline in the shipped code ends in grep -q" {
+  # Under pipefail, `producer | grep -q` fails whenever grep matches before the
+  # producer has finished writing: the producer gets SIGPIPE and the pipeline
+  # reports 141. It is a coin toss that depends on output size and timing, so
+  # no functional test catches every instance. Read the input whole first
+  # (a variable and <<<, or < <(...)).
+  cd "$REPO_ROOT"
+  local hits
+  hits="$(grep -nE '\|[[:space:]]*grep[[:space:]]+(-[A-Za-z]+[[:space:]]+)*-[A-Za-z]*q' \
+            cerberus.sh master.sh install.sh uninstall.sh lib/*.sh \
+            ir/quick_response.sh ir/emergency_remediation.sh ir/docker/*.sh \
+            packaging/build-deb.sh \
+          | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' || true)"
+  [ -z "$hits" ] || { echo "$hits"; false; }
+}

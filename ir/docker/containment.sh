@@ -313,7 +313,9 @@ status_report() {
     echo ""
     
     # Статус контейнера
-    if docker ps -a --format '{{.Names}}' | grep -q "$CONTAINER_NAME"; then
+    # not `docker ps | grep -q`: under pipefail docker's SIGPIPE after the
+    # match makes the pipeline fail
+    if grep -q -- "$CONTAINER_NAME" <<<"$(docker ps -a --format '{{.Names}}' 2>/dev/null)"; then
         local status
         status=$(docker inspect -f '{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null)
         local started

@@ -232,7 +232,9 @@ read_sig() {
 is_whitelisted() {
   [ -f "$WHITELIST_FILE" ] || return 1
   local c="$1"
-  sed -e 's/#.*//' -e 's/[[:space:]]//g' "$WHITELIST_FILE" | grep -qxF "$c"
+  # Process substitution, not a pipe: under pipefail, sed's SIGPIPE after
+  # grep -q has matched would turn a hit into a miss.
+  grep -qxF -- "$c" < <(sed -e 's/#.*//' -e 's/[[:space:]]//g' "$WHITELIST_FILE")
 }
 
 # --- Event record + notification --------------------------------------

@@ -66,7 +66,8 @@ _sig_update_into() {
       [ -n "$want" ] || { err "could not fetch the expected digest"; return 1; }
       ;;
   esac
-  if ! printf '%s' "$want" | grep -qE '^[0-9a-fA-F]{64}$'; then
+  local hex64='^[0-9a-fA-F]{64}$'
+  if ! [[ "$want" =~ $hex64 ]]; then
     err "SIGNATURE_SHA256 is not a sha256 digest"
     return 1
   fi

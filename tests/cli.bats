@@ -186,3 +186,39 @@ EOF
   run "$TEST_TMP/sbin/b" digest 1
   [ "$status" -eq 0 ]
 }
+
+# A long listing, the unit on the first line, and a systemctl that dies of
+# SIGPIPE when the reader goes away -- which is what the real one does.
+_unit_files_shim() {
+  { echo "eyes-cerberus.service enabled enabled"
+    for i in $(seq 1 20000); do echo "filler-$i.service static -"; done
+  } > "$FIXTURE_DIR/systemctl_unit_files"
+  # exec: the shim's own exit status must be cat's, killed by SIGPIPE, not
+  # that of a script that outlived it
+  _write_shim systemctl <<'SHIM'
+#!/usr/bin/env bash
+case "$*" in
+  *list-unit-files*) exec cat "$FIXTURE_DIR/systemctl_unit_files" ;;
+esac
+exit 0
+SHIM
+}
+
+@test "master.sh status finds the installed unit however long the listing" {
+  # `systemctl list-unit-files | grep -q` under pipefail: grep exits on the
+  # match, systemctl dies writing the rest, the pipeline says 141, and status
+  # printed "unit not installed" next to a running daemon.
+  _unit_files_shim
+  local i
+  for i in 1 2 3; do
+    run "$REPO_ROOT/master.sh" status
+    [[ "$output" != *"unit not installed"* ]]
+    [[ "$output" == *"daemon: active"* ]]
+  done
+}
+
+@test "master.sh status says so when the unit is not installed" {
+  fixture systemctl_unit_files "ssh.service enabled enabled"
+  run "$REPO_ROOT/master.sh" status
+  [[ "$output" == *"unit not installed"* ]]
+}

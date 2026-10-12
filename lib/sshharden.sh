@@ -170,8 +170,12 @@ _ssh_valid_port() {
   return 0
 }
 
+# No `producer | grep -q` anywhere in this file: under pipefail the producer's
+# SIGPIPE, after grep -q has already matched and exited, turns a match into 141.
 _ssh_listening() {
-  ss -tlnH 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$1\$"
+  local ports
+  ports="$(ss -tlnH 2>/dev/null | awk '{print $4}')"
+  grep -qE "[:.]$1\$" <<<"$ports"
 }
 
 # _ssh_wait_listen <port> : the port is listening within SSH_VERIFY_SECONDS.
@@ -211,16 +215,20 @@ _ssh_reload_f2b() {
 # means the new port is unreachable. The rollback would catch it; saying so
 # up front saves the operator fifteen minutes.
 _ssh_firewall_warn() {
-  local port="$1"
+  local port="$1" rules
   if command -v iptables >/dev/null 2>&1; then
-    if iptables -S INPUT 2>/dev/null | grep -qE '^-P INPUT (DROP|REJECT)' && \
-       ! iptables -S INPUT 2>/dev/null | grep -qE -- "--dport $port( |$)"; then
+    rules="$(iptables -S INPUT 2>/dev/null)"
+    if grep -qE '^-P INPUT (DROP|REJECT)' <<<"$rules" && \
+       ! grep -qE -- "--dport $port( |$)" <<<"$rules"; then
       warn "INPUT policy drops by default and no rule opens port $port -- open it first"
     fi
   fi
-  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
-    ufw status 2>/dev/null | grep -qE "^$port(/tcp)? " || \
-      warn "ufw is active and has no rule for $port -- run: ufw allow $port/tcp"
+  if command -v ufw >/dev/null 2>&1; then
+    rules="$(ufw status 2>/dev/null)"
+    if grep -q '^Status: active' <<<"$rules"; then
+      grep -qE "^$port(/tcp)? " <<<"$rules" || \
+        warn "ufw is active and has no rule for $port -- run: ufw allow $port/tcp"
+    fi
   fi
   info "a firewall at the hosting provider is invisible from here: if port $port is closed there, the new session will not connect and the change rolls back by itself"
 }
