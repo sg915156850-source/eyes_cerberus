@@ -1,6 +1,11 @@
 # Process names (ps `comm`, exact match, max 15 chars as the kernel truncates)
-# that Cerberus must never flag for CPU/miner heuristics. C2 / known-hash /
-# known-path detectors ignore this list on purpose.
+# that Cerberus must never flag for sustained high CPU (`high_cpu`). One name
+# per line; spaces inside a name are kept, so "npm exec vite p" works.
+#
+# Every other detector ignores this list on purpose -- `miner` included: a
+# miner can rename itself to anything on it, so a whitelisted name would be the
+# cheapest way to make a CPU-hot miner look harmless. The same goes for the
+# C2, known-hash and known-path detectors.
 #
 # Keep this conservative: only add names you are certain are benign on this host.
 

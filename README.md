@@ -71,7 +71,7 @@ lib/
   baseline.sh            persistence-surface snapshot + diff
 etc/
   cerberus.env.example   copy to cerberus.env and edit (cerberus.env is git-ignored)
-  whitelist.txt          process names exempt from CPU/miner heuristics
+  whitelist.txt          process names exempt from the high_cpu heuristic
   signatures/            malware_md5, malware_sha256, malware_paths, c2_ips,
                          c2_ports, miner_patterns, revshell_patterns,
                          loader_patterns
@@ -112,12 +112,20 @@ state/                   runtime (git-ignored): events.jsonl, evidence/, quarant
 | `new_listener` | a listening TCP port absent from `state/baseline/listeners` |
 | `persistence` | additions vs `state/baseline/` in: root crontab, `/etc/cron.*`, systemd unit files, running services, `/root/.ssh/authorized_keys`, root shell rc files, `/etc/ld.so.preload`, accounts in `/etc/passwd`, `sudoers` + `sudoers.d`, effective `sshd_config`, `/etc/pam.d`, and setuid/setgid files under `SETUID_DIRS` (checked once every `PERSISTENCE_EVERY` passes; removals are ignored) |
 | `upx_new` | a newly-appeared UPX-packed executable in a world-writable dir |
-| `egress` | new outbound connection to a non-whitelisted external IP (**off by default**, noisy) |
 
 Out of scope by design: the persistence/dotfile checks above only cover the
 specific paths listed (crontab, `cron.*`, systemd units, `authorized_keys`,
 shell rc files, `ld.so.preload`, etc.) — the daemon does not scan arbitrary
 top-level dotfiles or directories under `/root`.
+
+There is no general outbound-connection (egress) watch: outbound traffic is
+checked only against the known C2 addresses (`c2_socket`). Earlier versions of
+this README listed an `egress` detector and a `DETECT_EGRESS` switch that were
+never implemented; a leftover `DETECT_EGRESS=` line in `cerberus.env` does
+nothing.
+
+`whitelist.txt` exempts a process name from `high_cpu` only. `miner` does not
+read it: a whitelisted name would be the cheapest disguise for a miner.
 
 ---
 
@@ -345,7 +353,6 @@ cerberus.sh ssh status
 | `SETUID_DIRS` | `/tmp /var/tmp /dev/shm /home /root /opt /srv /usr/local` | where a new setuid file is worth reporting (not `/usr/bin`: that is package upgrades) |
 | `LOG_MAX_BYTES` / `LOG_KEEP` | `10485760` / `5` | rotate `events.jsonl` and `cerberus.log` past this size, keeping N generations |
 | `SIGNATURE_URL` / `SIGNATURE_SHA256` | empty | signature bundle for `update-sigs`, and the digest (inline or a URL) it must match |
-| `DETECT_EGRESS` | `0` | outbound-connection watch — noisy, opt-in |
 
 Signatures are plain text, one entry per line, `#` comments — edit and the daemon
 picks them up on the next pass (no restart needed).
