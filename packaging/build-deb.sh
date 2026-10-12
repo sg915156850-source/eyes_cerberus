@@ -99,24 +99,61 @@ fi
 chown root:root "$CONF/cerberus.env"
 chmod 600 "$CONF/cerberus.env"
 
+UNIT=eyes-cerberus.service
+started=0
 if [ -d /run/systemd/system ]; then
   systemctl daemon-reload || true
+  # $2 is the version being upgraded from; empty on a first install, which
+  # stays not started until the operator has reviewed the config. On an
+  # upgrade prerm only stopped the daemon and left the enablement alone, so
+  # is-enabled still says what the operator had chosen.
+  case "$1" in
+    configure|abort-upgrade)
+      if [ -n "${2:-}" ] && systemctl is-enabled --quiet "$UNIT" 2>/dev/null; then
+        if systemctl start "$UNIT"; then
+          started=1
+        else
+          echo "eyes-cerberus: $UNIT did not start -- see: journalctl -u $UNIT" >&2
+        fi
+      fi
+      ;;
+  esac
 fi
 
-cat <<'MSG'
+if [ "$started" = 0 ]; then
+  # A 2.1.1-or-older prerm ran 'disable --now' on every upgrade, and dpkg runs
+  # the old package's prerm, so an upgrade from one of those always lands here.
+  if [ "$1" = configure ] && [ -n "${2:-}" ] && \
+     dpkg --compare-versions "$2" le 2.1.1 2>/dev/null; then
+    echo "eyes-cerberus: the $2 package disabled the daemon while upgrading;" \
+         "if it was running, re-enable it: systemctl enable --now $UNIT"
+  fi
+  cat <<'MSG'
 eyes-cerberus installed but not started. Review the config, then:
     /opt/eyes-cerberus/cerberus.sh dryscan
     systemctl enable --now eyes-cerberus.service
 MSG
+fi
 exit 0
 EOF
 
+# Debian policy: only a removal takes the daemon down for good. On an upgrade
+# the old code is stopped before dpkg replaces it and the enablement is left
+# alone, so postinst can see it and start the new code. Disabling here on
+# every call left the host unwatched after each 'dpkg -i' of a new version.
 cat > "$BUILD/DEBIAN/prerm" <<'EOF'
 #!/bin/sh
 set -e
-if [ -d /run/systemd/system ]; then
-  systemctl disable --now eyes-cerberus.service >/dev/null 2>&1 || true
-fi
+UNIT=eyes-cerberus.service
+[ -d /run/systemd/system ] || exit 0
+case "$1" in
+  remove)
+    systemctl disable --now "$UNIT" >/dev/null 2>&1 || true
+    ;;
+  upgrade|failed-upgrade)
+    systemctl stop "$UNIT" >/dev/null 2>&1 || true
+    ;;
+esac
 exit 0
 EOF
 
