@@ -41,6 +41,34 @@ setup() {
   [[ "$output" == *"new in units_running: kdevtmpfsi.service"* ]]
 }
 
+@test "an on-demand service waking up is not reported as newly running" {
+  baseline_build
+  fixture systemctl_units_running "ssh.service" "fwupd.service" "packagekit.service"
+
+  run baseline_diff
+  [[ "$output" != *"fwupd.service"* ]]
+  [[ "$output" != *"packagekit.service"* ]]
+}
+
+@test "UNITS_RUNNING_IGNORE= (empty) watches every running service" {
+  UNITS_RUNNING_IGNORE=""
+  baseline_build
+  fixture systemctl_units_running "ssh.service" "fwupd.service"
+
+  run baseline_diff
+  [[ "$output" == *"new in units_running: fwupd.service"* ]]
+}
+
+@test "an ignored service with a new unit file is still reported under units" {
+  baseline_build
+  fixture systemctl_unit_files "ssh.service enabled" "fwupd.service static"
+  fixture systemctl_units_running "ssh.service" "fwupd.service"
+
+  run baseline_diff
+  [[ "$output" == *"new in units: fwupd.service static"* ]]
+  [[ "$output" != *"new in units_running"* ]]
+}
+
 @test "removals are not reported -- cleanup is not a threat signal" {
   fixture crontab_out "0 3 * * * /usr/local/bin/backup" "0 4 * * * /usr/local/bin/report"
   baseline_build

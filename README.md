@@ -355,6 +355,7 @@ cerberus.sh ssh status
 | `DETECT_HIGH_CPU` / `DETECT_NEW_LISTENER` / `DETECT_PERSISTENCE` / `DETECT_UPX_NEW` | `1` | toggle individual SOFT detectors |
 | `DETECT_REVSHELL` / `DETECT_FILELESS` / `DETECT_SETUID` / `DETECT_LOADER` | `1` | toggle the generic detectors |
 | `SETUID_DIRS` | `/tmp /var/tmp /dev/shm /home /root /opt /srv /usr/local` | where a new setuid file is worth reporting (not `/usr/bin`: that is package upgrades) |
+| `UNITS_RUNNING_IGNORE` | `fwupd.service packagekit.service` | services started on demand that exit when idle; not reported as "newly running" when they wake (a new unit file still is). Empty = watch all |
 | `LOG_MAX_BYTES` / `LOG_KEEP` | `10485760` / `5` | rotate `events.jsonl` and `cerberus.log` past this size, keeping N generations |
 | `SIGNATURE_URL` / `SIGNATURE_SHA256` | empty | signature bundle for `update-sigs`, and the digest (inline or a URL) it must match |
 

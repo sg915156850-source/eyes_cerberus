@@ -24,6 +24,12 @@ ROOT_AUTHORIZED_KEYS="${ROOT_AUTHORIZED_KEYS:-/root/.ssh/authorized_keys}"
 # are the places a fresh setuid root shell actually shows up.
 SETUID_DIRS="${SETUID_DIRS:-/tmp /var/tmp /dev/shm /home /root /opt /srv /usr/local}"
 
+# Services that D-Bus or a timer starts on demand and that exit when idle. They
+# come and go from the running list on their own, so a snapshot taken while one
+# was down reports it as "new" every time it wakes. They are left out of
+# units_running only: a new or changed unit file still shows up under units.
+UNITS_RUNNING_IGNORE="${UNITS_RUNNING_IGNORE-fwupd.service packagekit.service}"
+
 # Every category the snapshot records, in diff order. baseline_build writes this
 # list to $BASELINE_DIR/.categories, so a later version that adds a category can
 # tell "never recorded" from "recorded, and it was empty".
@@ -59,7 +65,10 @@ _baseline_capture() {
     | awk '{print $1, $2}' | sort > "$dst/units" || true
 
   systemctl list-units --type=service --state=running --no-legend --no-pager 2>/dev/null \
-    | awk '{print $1}' | sort > "$dst/units_running" || true
+    | awk -v ignore="$UNITS_RUNNING_IGNORE" '
+        BEGIN { n = split(ignore, a, /[[:space:]]+/); for (i = 1; i <= n; i++) skip[a[i]] = 1 }
+        !($1 in skip) { print $1 }' \
+    | sort > "$dst/units_running" || true
 
   sort "$ROOT_AUTHORIZED_KEYS" 2>/dev/null > "$dst/root_authorized_keys" || true
 

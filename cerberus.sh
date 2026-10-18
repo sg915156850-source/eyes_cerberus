@@ -43,7 +43,7 @@ source "$_dir/lib/report.sh"
 # shellcheck source=lib/sshharden.sh
 source "$_dir/lib/sshharden.sh"
 
-VERSION="2.1.2"
+VERSION="2.1.3"
 
 one_pass() {
   local act="$1"   # act | noact

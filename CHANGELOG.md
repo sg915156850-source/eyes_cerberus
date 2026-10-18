@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1.3 — 2026-10-18
+
+### Fixed
+- **On-demand services read as new persistence every time they woke.**
+  `fwupd.service` and `packagekit.service` are started by D-Bus or a timer and
+  exit when idle; a baseline taken while one was down reported it as "new in
+  units_running" each time it ran again -- 75 of the 122 events in the first
+  six days on the second host. They are now left out of the running-service
+  snapshot (`UNITS_RUNNING_IGNORE`, empty = watch everything). A new or
+  changed unit file for them is still reported under `units`.
+
 ## 2.1.2 — 2026-10-12
 
 The first install on a second host, from a clean checkout with `install.sh`,
